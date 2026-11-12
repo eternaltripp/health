@@ -43,6 +43,18 @@
 - Fixed during deploy: Cloudflare's GitHub link was disconnected (Michael reconnected it). The first deploy wiped plain-text dashboard variables; they're now secrets and `keep_vars: true` is set.
 - import_tracker tool removed from the code after the import (with `keep_vars` the dashboard copy of IMPORT_ENABLED would have kept it on). `src/importer.js` stays in the repo for reference; remove the leftover IMPORT_ENABLED variable in the dashboard any time.
 
+## 2026-11-11: Phase 1.1, web page
+
+### Built
+- `/app`: one-page phone web app (Today / Lift / Week). Today: calorie and protein bars, last night's Oura + CPAP, Sync button, quick-add templates (the old tracker's presets), add food, food list with delete, weight, BP, water, wine, sauna, note. Lift: exercise picker from history, last session's sets + that day's note, log a set, rest timer, today's sets with delete. Week: averages, daily table, 28-day weight chart.
+- `/api/*`: JSON endpoints the page uses. Same database and same write helpers as the MCP tools (moved into `data.js`).
+- `src/access.js`: verifies the Cloudflare Access JWT (RS256 against the team's certs, aud, issuer, expiry). `/app` and `/api` refuse everything without it, even if the Access app is deleted by mistake. Tested locally: valid token passes; wrong aud, wrong issuer, expired and forged signature all fail.
+
+### Decisions
+- Access must cover only `/app` and `/api`, not the whole hostname, or the Claude connector (`/mcp`) breaks.
+- Delete is two taps (no browser confirm dialog).
+- Targets on the page (1,900 cal, 230 g) come from the build spec's targets section.
+
 ### Next
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.
 - Phase 2: researched rules, morning push, Sunday review.

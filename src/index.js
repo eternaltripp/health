@@ -3,8 +3,11 @@ import { handleMcp } from "./mcp.js";
 import { syncAll } from "./sync.js";
 import { authUrl, exchangeCode } from "./oura.js";
 import { chicagoHour, chicagoDate, json, html, safeEqual, notify } from "./util.js";
+import { verifyAccess } from "./access.js";
+import { handleApi } from "./api.js";
+import APP_HTML from "./app.html";
 
-const VERSION = "phase1-2026-11-11";
+const VERSION = "phase1.1-2026-11-11";
 
 export default {
   async fetch(request, env, ctx) {
@@ -25,6 +28,26 @@ export default {
         }
         await ensureSchema(env.DB);
         return handleMcp(request, env);
+      }
+
+      // Web page + its API. Locked to Cloudflare Access; the worker verifies the
+      // Access token itself, so nothing is served if Access is missing or off.
+      if (path === "/app" || path.startsWith("/api/")) {
+        // DEV_NO_ACCESS exists only in local .dev.vars for wrangler dev; never set it in Cloudflare.
+        const devBypass = env.DEV_NO_ACCESS === "1" && url.hostname === "localhost";
+        if (!devBypass) {
+          const a = await verifyAccess(request, env);
+          if (a.error) {
+            return path === "/app"
+              ? html("<h2>Locked</h2><p>This page needs Cloudflare Access. (" + a.error + ")</p>", 403)
+              : json({ error: "forbidden", reason: a.error }, 403);
+          }
+        }
+        await ensureSchema(env.DB);
+        if (path === "/app") {
+          return new Response(APP_HTML, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer" } });
+        }
+        return handleApi(request, env, path);
       }
 
       // Oura re-link. Off unless OURA_AUTH_ENABLED=1, so nobody can attach a

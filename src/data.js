@@ -175,3 +175,44 @@ export async function getLifts(db, { exercise, days = 90 } = {}) {
   }
   return Object.values(sessions);
 }
+
+// ---------- shared inserts (MCP tools and the web page both use these) ----------
+
+export async function logFood(db, date, meal, items) {
+  const res = await db.batch(items.map((i) => db.prepare(
+    "INSERT INTO food (date, meal, name, cal, protein_g, sodium_mg, est, source) VALUES (?,?,?,?,?,?,?,?) RETURNING id"
+  ).bind(date, meal, i.name, i.cal, i.protein_g, i.sodium_mg ?? null, i.est === false ? 0 : 1, i.source || "mcp")));
+  return res.map((r, k) => ({ id: r.results[0].id, name: items[k].name }));
+}
+
+export async function logLift(db, date, exercise, sets, source = "mcp") {
+  const max = await first(db, "SELECT COALESCE(MAX(set_no),0) m FROM lifts WHERE date=? AND exercise=?", date, exercise);
+  let n = max.m;
+  await db.batch(sets.map((s) => db.prepare(
+    "INSERT INTO lifts (date, exercise, set_no, weight_lb, reps, rpe, note, source) VALUES (?,?,?,?,?,?,?,?)"
+  ).bind(date, exercise, ++n, s.weight_lb, s.reps, s.rpe ?? null, s.note ?? null, source)));
+  return n;
+}
+
+export async function logBp(db, when, date, sys, dia, pulse, note, source = "mcp") {
+  return first(db, "INSERT INTO bp (ts, date, sys, dia, pulse, note, source) VALUES (?,?,?,?,?,?,?) RETURNING id",
+    when.toISOString(), date, sys, dia, pulse ?? null, note ?? null, source);
+}
+
+export async function deleteEntry(db, kind, id) {
+  const table = { food: "food", lift: "lifts", bp: "bp" }[kind];
+  if (!table) return null;
+  return db.prepare(`DELETE FROM ${table} WHERE id=? RETURNING *`).bind(id).first();
+}
+
+/** Exercises by most recent use, with that last session's sets and the day note. */
+export async function exerciseHistory(db, limit = 40) {
+  const ex = await all(db, "SELECT exercise, MAX(date) last FROM lifts GROUP BY exercise ORDER BY last DESC LIMIT ?", limit);
+  const out = [];
+  for (const e of ex) {
+    const sets = await all(db, "SELECT set_no, weight_lb, reps, rpe, note FROM lifts WHERE exercise=? AND date=? ORDER BY set_no", e.exercise, e.last);
+    const d = await first(db, "SELECT note FROM days WHERE date=?", e.last);
+    out.push({ exercise: e.exercise, last_date: e.last, sets, day_note: d ? d.note : null });
+  }
+  return out;
+}

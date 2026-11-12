@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { chicagoDate, addDays, isYmd } from "./util.js";
-import { upsertDay, appendNote, foodTotals, getDay, getWeek, getTrends, getLabs, getMeds, getLifts, TREND_METRICS } from "./data.js";
+import { upsertDay, appendNote, foodTotals, getDay, getWeek, getTrends, getLabs, getMeds, getLifts, TREND_METRICS, logFood, logLift, logBp, deleteEntry } from "./data.js";
 import { syncAll } from "./sync.js";
 
 const DateArg = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
@@ -41,10 +41,8 @@ function buildServer(env) {
     },
   }, async ({ date, meal, items }) => {
     const d = day(date);
-    const res = await db.batch(items.map((i) => db.prepare(
-      "INSERT INTO food (date, meal, name, cal, protein_g, sodium_mg, est, source) VALUES (?,?,?,?,?,?,?, 'mcp') RETURNING id"
-    ).bind(d, meal, i.name, i.cal, i.protein_g, i.sodium_mg ?? null, i.est === false ? 0 : 1)));
-    return ok({ logged: res.map((r, k) => ({ id: r.results[0].id, name: items[k].name })), date: d, day_totals: await foodTotals(db, d) });
+    const logged = await logFood(db, d, meal, items);
+    return ok({ logged, date: d, day_totals: await foodTotals(db, d) });
   });
 
   server.registerTool("log_lift", {
@@ -63,11 +61,7 @@ function buildServer(env) {
     },
   }, async ({ date, exercise, sets }) => {
     const d = day(date);
-    const max = await db.prepare("SELECT COALESCE(MAX(set_no),0) m FROM lifts WHERE date=? AND exercise=?").bind(d, exercise).first();
-    let n = max.m;
-    await db.batch(sets.map((s) => db.prepare(
-      "INSERT INTO lifts (date, exercise, set_no, weight_lb, reps, rpe, note, source) VALUES (?,?,?,?,?,?,?, 'mcp')"
-    ).bind(d, exercise, ++n, s.weight_lb, s.reps, s.rpe ?? null, s.note ?? null)));
+    const n = await logLift(db, d, exercise, sets);
     return ok({ date: d, exercise, sets_logged: sets.length, sets_today: n });
   });
 
@@ -85,8 +79,7 @@ function buildServer(env) {
     const when = ts ? new Date(ts) : new Date();
     if (isNaN(when)) return fail("ts is not a valid timestamp");
     const d = chicagoDate(when);
-    const r = await db.prepare("INSERT INTO bp (ts, date, sys, dia, pulse, note, source) VALUES (?,?,?,?,?,?, 'mcp') RETURNING id")
-      .bind(when.toISOString(), d, sys, dia, pulse ?? null, note ?? null).first();
+    const r = await logBp(db, when, d, sys, dia, pulse, note);
     return ok({ id: r.id, date: d, sys, dia, pulse: pulse ?? null });
   });
 
@@ -181,8 +174,7 @@ function buildServer(env) {
     description: "Delete one mistaken food, lift or BP entry by id (ids come from get_day / get_lifts). Only use when he asks to remove or correct an entry.",
     inputSchema: { kind: z.enum(["food", "lift", "bp"]), id: z.number().int() },
   }, async ({ kind, id }) => {
-    const table = { food: "food", lift: "lifts", bp: "bp" }[kind];
-    const row = await db.prepare(`DELETE FROM ${table} WHERE id=? RETURNING *`).bind(id).first();
+    const row = await deleteEntry(db, kind, id);
     return row ? ok({ deleted: row }) : fail(`no ${kind} with id ${id}`);
   });
 

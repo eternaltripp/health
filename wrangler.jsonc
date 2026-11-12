@@ -29,8 +29,9 @@
   ],
 
   // Load .sql files as text so the worker can apply its own migrations.
-  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+  "rules": [{ "type": "Text", "globs": ["**/*.sql", "**/*.html"], "fallthrough": true }],
 
+  // ACCESS_TEAM_DOMAIN and ACCESS_AUD are set in the dashboard (not secrets).
   "vars": {
     // "1" re-enables the /auth Oura login route. Off by default so nobody can
     // link a different Oura account over the saved tokens.
