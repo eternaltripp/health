@@ -33,7 +33,16 @@
 - Verified locally: per-day calories and protein match the tracker's own `totals()` formula for all 17 days.
 - Lab units are filled only where the baseline doc gave them. Dates given only as a month (Apr 2026 ER labs, PSA) were matched to the known draw date; noted per row.
 
+### Live test results (2026-11-11, 22:10 CT, through the claude.ai connector)
+- Deploy live at https://health.m2thompson.workers.dev. `/` returns ok; `/mcp` with a wrong token returns 401.
+- sync_now from 2026-10-01: Oura 42 days, CPAP 42 nights, no errors. Re-run for 3 days: 3 rows each; HRV series still 42 rows (no duplicates).
+- Import: days 17, food 97, lifts 27, labs 87, meds 10. Per-day calories and protein match the tracker's own formula on all 17 days (31,525 cal / 2,640 g).
+- Cross-check: tracker's Oura/CPAP snapshots for 10/30 and 11/5 match the API rows exactly, which confirms the CPAP night-before attribution.
+- log_food -> get_day -> delete_entry round trip: pass.
+- get_labs (hematocrit, 4 results), get_lifts (bench 11/9, 5 sets), get_week, get_trends: pass.
+- Fixed during deploy: Cloudflare's GitHub link was disconnected (Michael reconnected it). The first deploy wiped plain-text dashboard variables; they're now secrets and `keep_vars: true` is set.
+- `IMPORT_ENABLED` set to "0" after the import.
+
 ### Next
-- Set `IMPORT_ENABLED` to "0" after migration is confirmed.
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.
 - Phase 2: researched rules, morning push, Sunday review.
