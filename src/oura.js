@@ -5,7 +5,7 @@ import { addDays, round1 } from "./util.js";
 const OURA_AUTH = "https://cloud.ouraring.com/oauth/authorize";
 const OURA_TOKEN = "https://api.ouraring.com/oauth/token";
 const OURA_API = "https://api.ouraring.com/v2/usercollection";
-// heart_health = VO2 max + cardiovascular age (RESEARCHED: openwearables.io Oura guide lists it as an Oura scope). The scope must also be ticked on the app at cloud.ouraring.com/oauth/applications.
+// heart_health = VO2 max + cardiovascular age (RESEARCHED: openwearables.io Oura guide, Home Assistant forum). Must be ticked on the Oura app, and the app's redirect URI must include https://health.m2thompson.workers.dev/callback.
 const SCOPES = "personal daily heartrate heart_health";
 
 export function authUrl(env, redirectUri, state) {
