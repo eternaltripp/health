@@ -218,6 +218,8 @@ svg text{fill:var(--muted);font:11px var(--mono)}
   </div>
   <h2>Withings</h2>
   <div class="card" id="wiCard"></div>
+  <h2>Morning push</h2>
+  <div class="card"><div class="row"><span class="grow src">Sends at 6:30 a.m. Central. Test it now:</span><button class="g" id="pushBtn">Send test push</button></div></div>
   <h2>Targets</h2>
   <div class="card" id="setCard"></div>
 </section>
@@ -460,6 +462,7 @@ $("eySave").onclick = async () => {
   await api("/api/eye", { date: $("eyDate").value, injection: $("eyInj").checked, drug: $("eyDrug").value, interval_weeks: $("eyInt").value, oct_thickness: $("eyOct").value, note: $("eyNote").value });
   toast("Visit saved"); loadBody();
 };
+$("pushBtn").onclick = async () => { const r = await api("/api/push", {}); toast("Sent: " + r.text.slice(0, 40) + "…"); };
 $("glAdd").onclick = async () => { await api("/api/glucose", { mg_dl: $("glV").value }); $("glV").value = ""; toast("Glucose saved"); loadBody(); };
 function renderTrend(pts) {
   if (pts.length < 2) { $("trend").innerHTML = '<span class="src">Not enough weigh-ins yet.</span>'; return; }

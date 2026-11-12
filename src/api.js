@@ -2,7 +2,8 @@
 import { chicagoDate, isYmd, json } from "./util.js";
 import { getDay, getWeek, getTrends, upsertDay, logFood, logLift, logBp, deleteEntry, exerciseHistory } from "./data.js";
 import { syncAll } from "./sync.js";
-import { evaluate } from "./rules.js";
+import { evaluate, runRules, pushText } from "./rules.js";
+import { notify } from "./util.js";
 import { getReview, bodySummary, visitPacket } from "./review.js";
 import { logScan, logEye, logGlucose, getGlucose, listSettings, listLiftTargets } from "./data.js";
 import { withingsConfigured, withingsStatus, withingsAuthUrl, withingsCallback } from "./withings.js";
@@ -121,6 +122,13 @@ export async function handleApi(request, env, path) {
       const mg = num(body.mg_dl, 20, 600); if (mg == null) return bad("mg_dl required");
       const ts = new Date().toISOString();
       return json({ saved: await logGlucose(db, [{ ts, mg_dl: mg }], "manual", (t) => chicagoDate(new Date(t))) });
+    }
+    if (path === "/api/push") {
+      const d = chicagoDate();
+      const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
+      const plan = row ? JSON.parse(row.plan) : await runRules(db, d, { apply: false });
+      const text = pushText(plan);
+      return (await notify(env, text, "Today (test)")) ? json({ sent: true, text }) : json({ error: "push failed or NTFY_TOPIC missing" }, 502);
     }
     if (path === "/api/sync") return json(await syncAll(env, { days: 2, trigger: "web" }));
   }
