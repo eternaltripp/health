@@ -53,6 +53,8 @@
 ### Decisions
 - Access must cover only `/app` and `/api`, not the whole hostname, or the Claude connector (`/mcp`) breaks.
 - Delete is two taps (no browser confirm dialog).
+- Protein cans get a +/- counter on Today (`/api/cans`); minus shrinks an old "xN" row instead of deleting it. Per-can sodium 95 mg taken from the existing Genius Gourmet entry (380 mg / 4).
+- Live check 11/11 22:30: page loads behind Access, no-login requests redirect to the Access login, connector unaffected.
 - Targets on the page (1,900 cal, 230 g) come from the build spec's targets section.
 
 ### Next
