@@ -74,6 +74,24 @@ export async function notifyDetail(env, msg, title = "Health") {
     return { ok: r.ok, status: r.status, reason: r.ok ? null : (await r.text()).slice(0, 200), url_form: /^https?:/i.test(String(env.NTFY_TOPIC).trim()) ? "full url" : "topic name", token: !!env.NTFY_TOKEN };
   } catch (e) { return { ok: false, reason: String(e.message || e) }; }
 }
+// Pushover is the primary channel (ntfy.sh timed out / hit the shared-IP quota
+// from Workers). ntfy stays as a fallback when Pushover isn't configured.
+// API: POST https://api.pushover.net/1/messages.json, token + user + message; success = status 1.
+export async function pushoverDetail(env, msg, title) {
+  try {
+    const r = await fetch("https://api.pushover.net/1/messages.json", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: env.PUSHOVER_TOKEN, user: env.PUSHOVER_USER, message: msg, title }),
+    });
+    const j = await r.json().catch(() => ({}));
+    return { ok: r.ok && j.status === 1, channel: "pushover", status: r.status, reason: j.errors ? j.errors.join("; ") : null };
+  } catch (e) { return { ok: false, channel: "pushover", reason: String(e.message || e) }; }
+}
+export async function sendPush(env, msg, title = "Health") {
+  if (env.PUSHOVER_TOKEN && env.PUSHOVER_USER) return pushoverDetail(env, msg, title);
+  return { channel: "ntfy", ...(await notifyDetail(env, msg, title)) };
+}
 export async function notify(env, msg, title = "Health") {
-  return (await notifyDetail(env, msg, title)).ok;
+  return (await sendPush(env, msg, title)).ok;
 }

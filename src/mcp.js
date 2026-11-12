@@ -212,16 +212,16 @@ function buildServer(env) {
 
   server.registerTool("send_push_now", {
     title: "Send today's plan push now",
-    description: "Send the morning plan notification (training call, calorie target, sodium cap, top watch item) to his phone right now. Use only when he asks to test or resend the push.",
+    description: "Send the morning plan push notification (Pushover) (training call, calorie target, sodium cap, top watch item) to his phone right now. Use only when he asks to test or resend the push.",
     inputSchema: {},
   }, async () => {
     const { runRules: rr, pushText: pt } = await import("./rules.js");
     const d = chicagoDate();
     const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
     const plan = row ? JSON.parse(row.plan) : await rr(db, d, { apply: false });
-    const { notify } = await import("./util.js");
-    const sent = await notify(env, pt(plan), "Today");
-    return sent ? ok({ sent: true, text: pt(plan) }) : fail("Push failed or NTFY_TOPIC missing.");
+    const { sendPush } = await import("./util.js");
+    const r = await sendPush(env, pt(plan), "Today");
+    return r.ok ? ok({ sent: true, channel: r.channel, text: pt(plan) }) : fail(`Push failed (${r.channel}): ${r.reason || r.status}`);
   });
 
   // ---------------- phase 4: body data ----------------

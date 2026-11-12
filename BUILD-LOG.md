@@ -84,6 +84,8 @@
 - Deploy phase4 live; migration 0002 applied. /api/plan, /api/review, /api/body, /api/visit all 200 on real data. Real data: rules report no_data/ok; CPAP 30-day compliance 100%; HRV in band; calorie target 1,900.
 - Push: ntfy.sh answered 429 "daily message quota reached". Anonymous ntfy quota is per IP and Workers share egress IPs. Fix: optional NTFY_TOKEN secret (ntfy account access token) sent as Bearer so the quota is the account's. Needs Michael to create the ntfy account/token.
 
+- 11/11 23:00: with NTFY_TOKEN set, ntfy.sh returned 522 (timeout) from the Worker. Switched pushes to Pushover (PUSHOVER_TOKEN + PUSHOVER_USER secrets; POST api.pushover.net/1/messages.json, success = status 1). ntfy kept only as fallback when Pushover isn't configured.
+
 ### Next
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.
 - Phase 2: researched rules, morning push, Sunday review.
