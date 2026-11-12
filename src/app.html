@@ -48,6 +48,7 @@ button.g{font:600 14px inherit;font-family:inherit;background:var(--accent-soft)
 .item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
 .item:last-child{border-bottom:0}
 .item .s{font-size:13px;color:var(--muted)}
+.cbtn{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--accent-soft);color:var(--accent);font:600 24px inherit;font-family:inherit;flex:none}
 .x{width:32px;height:32px;flex:none;border-radius:50%;border:1px solid var(--line);background:none;color:var(--muted);font-size:18px}
 .src{font-size:12px;color:var(--muted)}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:99px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
@@ -87,6 +88,13 @@ svg text{fill:var(--muted);font:11px var(--mono)}
     <div class="row"><span class="lbl grow">Last night</span><button class="g" id="syncBtn">Sync</button></div>
     <div class="mini" id="ouraRow"></div>
     <div class="mini" id="cpapRow"></div>
+  </div>
+
+  <div class="card row">
+    <span class="grow">Protein cans<br><span class="src">130 cal · 30 g each</span></span>
+    <button class="cbtn" id="canMinus" aria-label="Remove a can">−</button>
+    <span class="big" id="canN" style="min-width:1.5ch;text-align:center">0</span>
+    <button class="cbtn" id="canPlus" aria-label="Add a can">+</button>
   </div>
 
   <h2>Quick add</h2>
@@ -182,7 +190,6 @@ const TEMPLATES = [
   { n: "8 oz 93% beef + 2 cups veg", c: 500, p: 60, m: "lunch" },
   { n: "2 scoops whey + water", c: 240, p: 50, m: "shake" },
   { n: "Home: 8 oz protein + veg", c: 650, p: 60, m: "dinner" },
-  { n: "Sparkling protein can", c: 130, p: 30, m: "snack", exact: true },
   { n: "Mo' Bettahs chicken, no sauce/rice/mac", c: 475, p: 65, m: "other" },
   { n: "Cowboy Chicken half, skin off", c: 586, p: 66, m: "other" },
   { n: "Cowboy Chicken grilled breast", c: 290, p: 51, m: "other" },
@@ -244,6 +251,7 @@ function renderDay() {
   $("ouraRow").innerHTML = cell("Ready", o.readiness) + cell("Sleep", o.sleep_score) + cell("HRV", o.hrv) + cell("RHR", o.rhr);
   $("cpapRow").innerHTML = cell("CPAP h", c.hours) + cell("AHI", c.ahi) + cell("Leak", c.leak) + cell("Steps", o.steps != null ? (o.steps / 1000).toFixed(1) + "k" : null);
 
+  $("canN").textContent = d.food.items.filter((f) => /^Sparkling protein can/i.test(f.name)).reduce((a, f) => { const m = /x(\d+)/i.exec(f.name); return a + (m ? +m[1] : 1); }, 0);
   $("foodList").innerHTML = d.food.items.length ? d.food.items.map((f) =>
     `<div class="item"><span>${esc(f.name)}<br><span class="s">${f.meal} · ${Math.round(f.cal)} cal · ${Math.round(f.protein_g)}g${f.sodium_mg != null ? " · " + Math.round(f.sodium_mg) + " mg Na" : ""}${f.est ? " · est" : ""}</span></span><button class="x" data-del="food:${f.id}" aria-label="Delete">×</button></div>`).join("")
     : '<span class="src">Nothing logged yet.</span>';
@@ -253,6 +261,9 @@ function renderDay() {
   $("nNote").value = day.note ?? "";
   $("bpList").innerHTML = d.bp.map((b) => `<span class="row">${new Date(b.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}: ${b.sys}/${b.dia}${b.pulse ? " · " + b.pulse : ""} <button class="x" data-del="bp:${b.id}" aria-label="Delete">×</button></span>`).join("");
 }
+async function cans(delta) { await api("/api/cans", { date: cur, delta }); loadDay(); }
+$("canPlus").onclick = () => cans(1);
+$("canMinus").onclick = () => cans(-1);
 $("prev").onclick = () => { cur = addDays(cur, -1); loadDay(); };
 $("next").onclick = () => { if (cur < today()) { cur = addDays(cur, 1); loadDay(); } };
 

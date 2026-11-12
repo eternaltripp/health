@@ -3,6 +3,9 @@ import { chicagoDate, isYmd, json } from "./util.js";
 import { getDay, getWeek, getTrends, upsertDay, logFood, logLift, logBp, deleteEntry, exerciseHistory } from "./data.js";
 import { syncAll } from "./sync.js";
 
+// Per-can numbers: 130 cal / 30 g are the old tracker's; 95 mg sodium is from the
+// "x4 (Genius Gourmet)" entry already in the log (380 mg for 4).
+const CAN = { cal: 130, p: 30, na: 95 };
 const MEALS = new Set(["breakfast", "lunch", "dinner", "snack", "shake", "other"]);
 const num = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) && n >= lo && n <= hi ? n : null; };
 const bad = (msg) => json({ error: msg }, 400);
@@ -60,6 +63,29 @@ export async function handleApi(request, env, path) {
     if (path === "/api/delete") {
       const row = await deleteEntry(db, body.kind, Number(body.id));
       return row ? json({ deleted: row.id }) : json({ error: "not found" }, 404);
+    }
+    if (path === "/api/cans") {
+      // Protein cans: +1 adds one can row; -1 removes one can (shrinks an "xN" row
+      // left over from the old tracker, or deletes the latest single-can row).
+      const d = date(body.date), delta = Number(body.delta);
+      const rows = (await db.prepare("SELECT id, name, cal, protein_g, sodium_mg FROM food WHERE date=? AND name LIKE 'Sparkling protein can%' ORDER BY id DESC").bind(d).all()).results;
+      const count = (r) => { const m = /x(\d+)/i.exec(r.name); return m ? Number(m[1]) : 1; };
+      if (delta > 0) {
+        await logFood(db, d, "snack", [{ name: "Sparkling protein can (Genius Gourmet)", cal: CAN.cal, protein_g: CAN.p, sodium_mg: CAN.na, est: false, source: "web" }]);
+      } else if (rows.length) {
+        const r = rows[0], n = count(r);
+        if (n > 1) {
+          const k = (n - 1) / n;
+          await db.prepare("UPDATE food SET name=?, cal=?, protein_g=?, sodium_mg=? WHERE id=?")
+            .bind(r.name.replace(/x\d+/i, "x" + (n - 1)), r.cal * k, r.protein_g * k, r.sodium_mg == null ? null : r.sodium_mg * k, r.id).run();
+        } else {
+          await deleteEntry(db, "food", r.id);
+        }
+      }
+      const after = (await db.prepare("SELECT name FROM food WHERE date=? AND name LIKE 'Sparkling protein can%'").bind(d).all()).results;
+      const total = after.reduce((a, r) => a + count(r), 0);
+      await upsertDay(db, d, { cans: total });
+      return json({ cans: total });
     }
     if (path === "/api/sync") return json(await syncAll(env, { days: 2, trigger: "web" }));
   }
