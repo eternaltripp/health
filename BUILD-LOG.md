@@ -41,7 +41,7 @@
 - log_food -> get_day -> delete_entry round trip: pass.
 - get_labs (hematocrit, 4 results), get_lifts (bench 11/9, 5 sets), get_week, get_trends: pass.
 - Fixed during deploy: Cloudflare's GitHub link was disconnected (Michael reconnected it). The first deploy wiped plain-text dashboard variables; they're now secrets and `keep_vars: true` is set.
-- `IMPORT_ENABLED` set to "0" after the import.
+- import_tracker tool removed from the code after the import (with `keep_vars` the dashboard copy of IMPORT_ENABLED would have kept it on). `src/importer.js` stays in the repo for reference; remove the leftover IMPORT_ENABLED variable in the dashboard any time.
 
 ### Next
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.

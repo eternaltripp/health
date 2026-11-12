@@ -32,8 +32,6 @@
   "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
 
   "vars": {
-    // "1" exposes the one-time import_tracker MCP tool. Set to "0" after migration.
-    "IMPORT_ENABLED": "0",
     // "1" re-enables the /auth Oura login route. Off by default so nobody can
     // link a different Oura account over the saved tokens.
     "OURA_AUTH_ENABLED": "0"

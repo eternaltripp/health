@@ -4,7 +4,6 @@ import { z } from "zod";
 import { chicagoDate, addDays, isYmd } from "./util.js";
 import { upsertDay, appendNote, foodTotals, getDay, getWeek, getTrends, getLabs, getMeds, getLifts, TREND_METRICS } from "./data.js";
 import { syncAll } from "./sync.js";
-import { importRows } from "./importer.js";
 
 const DateArg = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
   .describe("YYYY-MM-DD (America/Chicago). Omit for today.");
@@ -186,22 +185,6 @@ function buildServer(env) {
     const row = await db.prepare(`DELETE FROM ${table} WHERE id=? RETURNING *`).bind(id).first();
     return row ? ok({ deleted: row }) : fail(`no ${kind} with id ${id}`);
   });
-
-  if (env.IMPORT_ENABLED === "1") {
-    server.registerTool("import_tracker", {
-      title: "One-time import (admin)",
-      description: "Admin only, one-time migration of the old Fuel Log tracker and lab baseline. Do not use for normal logging. Upserts by source key, so re-running is safe.",
-      inputSchema: {
-        days: z.array(z.record(z.any())).default([]),
-        food: z.array(z.record(z.any())).default([]),
-        lifts: z.array(z.record(z.any())).default([]),
-        labs: z.array(z.record(z.any())).default([]),
-        meds: z.array(z.record(z.any())).default([]),
-        labs_source: z.string().optional(),
-        meds_source: z.string().optional(),
-      },
-    }, async (args) => ok(await importRows(db, args)));
-  }
 
   return server;
 }
