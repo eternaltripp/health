@@ -10,9 +10,10 @@ import m0005 from "../migrations/0005_daily_features.sql";
 import m0006 from "../migrations/0006_clear_offcycle_target.sql";
 import m0007 from "../migrations/0007_push_note.sql";
 import m0008 from "../migrations/0008_goal_weight.sql";
+import m0009 from "../migrations/0009_clear_bad_burn.sql";
 
 // Statements are split on ";" so no string literal in a migration may contain one.
-const MIGRATIONS = [["0001_init.sql", m0001], ["0002_phase2.sql", m0002], ["0003_brief_2026_11_12.sql", m0003], ["0004_sodium_backfill.sql", m0004], ["0005_daily_features.sql", m0005], ["0006_clear_offcycle_target.sql", m0006], ["0007_push_note.sql", m0007], ["0008_goal_weight.sql", m0008]];
+const MIGRATIONS = [["0001_init.sql", m0001], ["0002_phase2.sql", m0002], ["0003_brief_2026_11_12.sql", m0003], ["0004_sodium_backfill.sql", m0004], ["0005_daily_features.sql", m0005], ["0006_clear_offcycle_target.sql", m0006], ["0007_push_note.sql", m0007], ["0008_goal_weight.sql", m0008], ["0009_clear_bad_burn.sql", m0009]];
 
 let ready = null; // per-isolate memo
 
