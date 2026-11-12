@@ -39,6 +39,9 @@ export async function weekendPlanText(db, date) {
   const floor = plan.calorie_floor || 1700;
   const over = each < floor;
   if (over) each = floor;
+  // Michael 2026-11-12: a weekend day never goes above the daily target.
+  const capped = each > target;
+  if (capped) each = target;
   const sat = addDays(date, 1), sun = addDays(date, 2);
   const plans = await all(db, "SELECT date, name FROM food WHERE restaurant=1 AND date IN (?,?) ORDER BY date, id", sat, sun);
   const notes = await all(db, "SELECT date, note FROM days WHERE date IN (?,?) AND note IS NOT NULL AND note<>''", sat, sun);

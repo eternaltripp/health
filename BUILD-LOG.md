@@ -107,3 +107,4 @@
 - Cron now `*/15 11-15,20-21 * * *`: 6:00 sync + models + first push try; retries to 9:00; Fri 15:00 weekend plan; weekdays 15:30 dinner prompt.
 - Rule 1 is report-only; calorie target comes from the weekly model (Sunday). Seed 1,900 until the first Sunday.
 - Oura VO2 max / cardio age: 401 with current token. Scopes widened; needs a re-auth.
+- Michael's calls (11-12 3:47 pm): burn window skips the first 7 days of weigh-ins; weekly target never rises while above goal_weight (new setting, blank = never); weekend-plan days capped at the daily target. Tested locally: burn 4,509 → target held at 1,900; weekend days 1,750 = target.

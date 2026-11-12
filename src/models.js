@@ -15,6 +15,8 @@ export const M = {
   kalmanR: 2.25, kalmanQ: 0.025,
   // Expenditure (SPEC, brief 2.2)
   expWindow: 21, expMinDays: 14, expCoverage: 0.8, kcalPerLb: 3500,
+  // Skip the first 7 days after the first weigh-in: diet-start water loss inflates burn (SPEC, Michael 2026-11-12).
+  expSkipFirstDays: 7,
   // Weekly target (SPEC, brief 2.3)
   deficit: 500, floor: 1700, weeklyCap: 150,
 };
@@ -60,7 +62,9 @@ async function modelWeightTrend(db, date) {
 export async function computeExpenditure(db, date) {
   const end = addDays(date, -1);
   const firstBoth = await first(db, `SELECT MIN(d.date) d FROM days d WHERE d.weight IS NOT NULL AND EXISTS (SELECT 1 FROM food f WHERE f.date=d.date)`);
-  const earliest = firstBoth && firstBoth.d;
+  const firstW = await first(db, "SELECT MIN(date) d FROM days WHERE weight IS NOT NULL");
+  let earliest = firstBoth && firstBoth.d;
+  if (earliest && firstW && firstW.d && addDays(firstW.d, M.expSkipFirstDays) > earliest) earliest = addDays(firstW.d, M.expSkipFirstDays);
   const base = { model: "expenditure", date };
   if (!earliest || earliest > end) return { ...base, ok: false, reason: "no days with both food and weight" };
   let start = addDays(end, -(M.expWindow - 1));
@@ -114,9 +118,16 @@ async function modelTarget(db, date, { force = false } = {}) {
   }
   const raw = exp.value - M.deficit;
   let t = Math.max(from - M.weeklyCap, Math.min(from + M.weeklyCap, raw));
+  // Michael 2026-11-12: target never goes up until he reaches goal weight (goal_weight setting) or changes it himself.
+  const goal = await first(db, "SELECT value FROM settings WHERE key='goal_weight'");
+  const goalW = goal && goal.value !== "" ? Number(goal.value) : null;
+  const trend = await first(db, "SELECT value FROM model_outputs WHERE model='weight_trend' AND date<=? ORDER BY date DESC LIMIT 1", date);
+  const aboveGoal = goalW == null || !trend || trend.value > goalW;
+  const heldDown = aboveGoal && t > from;
+  if (heldDown) t = from;
   t = Math.max(M.floor, Math.round(t / 10) * 10);
   const inputs = { burn: exp.value, deficit: M.deficit, raw_target: raw, previous: from, previous_from: prev ? prev.date : "calorie_base seed", cap: M.weeklyCap, floor: M.floor,
-    capped: t !== Math.max(M.floor, Math.round(raw / 10) * 10), labels: "deficit 500, floor 1700, cap 150: SPEC (brief 2.3)" };
+    capped: t !== Math.max(M.floor, Math.round(raw / 10) * 10), held_no_increase: heldDown, goal_weight: goalW, labels: "deficit 500, floor 1700, cap 150: SPEC (brief 2.3)" };
   await save(db, date, "calorie_target", t, inputs, "target-1");
   return { model: "calorie_target", value: t, inputs };
 }

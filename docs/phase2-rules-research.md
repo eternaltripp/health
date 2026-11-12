@@ -165,3 +165,6 @@ These rules produce flags and suggestions. They don't diagnose. Anything medical
 | Scorecard labs | lab's own H/L flag | lab reference range |
 | Capacity reminder | 90+ days | SPEC (brief 4.2) |
 | Oura scope for VO2 max | heart_health | FROM MEMORY, confirm at re-auth |
+| Burn window start | first weigh-in + 7 days | SPEC: Michael 2026-11-12 (diet-start water loss) |
+| Target can't rise | until trend weight ≤ goal_weight (blank = never) | SPEC: Michael 2026-11-12 |
+| Weekend day cap | ≤ daily target | SPEC: Michael 2026-11-12 |

@@ -360,7 +360,7 @@ export async function getGlucose(db, date) {
   return { date, readings: rows.length, mean: v.length ? r1(v.reduce((a, b) => a + b, 0) / v.length) : null, peak: v.length ? Math.max(...v) : null, over_140: v.filter((x) => x > 140).length, series: rows };
 }
 
-export const SETTING_KEYS = ["calorie_base", "calorie_floor", "calorie_adjust", "protein_target", "step_baseline", "sodium_cap_default", "sodium_cap_low", "apob_target", "wine_weekly_cap", "push_enabled", "push_friday_enabled", "push_dinner_prompt_enabled"];
+export const SETTING_KEYS = ["calorie_base", "calorie_floor", "calorie_adjust", "protein_target", "step_baseline", "sodium_cap_default", "sodium_cap_low", "apob_target", "wine_weekly_cap", "push_enabled", "push_friday_enabled", "push_dinner_prompt_enabled", "goal_weight"];
 export async function setSetting(db, key, value) {
   if (!SETTING_KEYS.includes(key)) throw new Error("unknown setting " + key);
   await db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?,?,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')").bind(key, value == null ? "" : String(value)).run();
