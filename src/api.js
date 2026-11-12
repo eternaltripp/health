@@ -3,7 +3,7 @@ import { chicagoDate, isYmd, json } from "./util.js";
 import { getDay, getWeek, getTrends, upsertDay, logFood, logLift, logBp, deleteEntry, exerciseHistory } from "./data.js";
 import { syncAll } from "./sync.js";
 import { evaluate, runRules, pushText } from "./rules.js";
-import { notify } from "./util.js";
+import { notifyDetail } from "./util.js";
 import { getReview, bodySummary, visitPacket } from "./review.js";
 import { logScan, logEye, logGlucose, getGlucose, listSettings, listLiftTargets } from "./data.js";
 import { withingsConfigured, withingsStatus, withingsAuthUrl, withingsCallback } from "./withings.js";
@@ -128,7 +128,8 @@ export async function handleApi(request, env, path) {
       const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
       const plan = row ? JSON.parse(row.plan) : await runRules(db, d, { apply: false });
       const text = pushText(plan);
-      return (await notify(env, text, "Today (test)")) ? json({ sent: true, text }) : json({ error: "push failed or NTFY_TOPIC missing" }, 502);
+      const r = await notifyDetail(env, text, "Today (test)");
+      return r.ok ? json({ sent: true, text, ntfy_status: r.status }) : json({ error: "push failed", detail: r }, 502);
     }
     if (path === "/api/sync") return json(await syncAll(env, { days: 2, trigger: "web" }));
   }
