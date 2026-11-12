@@ -32,9 +32,8 @@ export async function handleApi(request, env, path) {
     }
     if (path === "/api/exercises") return json({ exercises: await exerciseHistory(db) });
     if (path === "/api/plan") {
-      const d = date(q("date"));
-      const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
-      return json(row ? JSON.parse(row.plan) : await evaluate(db, d));
+      // Always fresh (Oura can land after 6:00); runRules stores it without changing calories.
+      return json(await runRules(db, date(q("date")), { apply: false }));
     }
     if (path === "/api/review") return json(await getReview(db, date(q("end"))));
     if (path === "/api/visit") return json(await visitPacket(db, date(q("end")), num(q("days") || 30, 7, 365) || 30));

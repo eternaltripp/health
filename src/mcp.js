@@ -186,16 +186,12 @@ function buildServer(env) {
   server.registerTool("get_plan", {
     title: "Today's plan",
     description:
-      "Today's training call (train as planned vs Zone 2), calorie target, step bonus, protein target, sodium cap, and any rule flags (weight-loss rate, lean mass, lift progression, BP, hematocrit, CPAP, glucose, ApoB, HRV/resting HR). " +
-      "Use when he asks what to eat, whether to lift, how much he has left today, or what to watch. refresh=true re-runs the rules now instead of using the 6 a.m. result.",
+      "Today's training call (train as planned, lift lighter after a short night, or Zone 2), calorie target, step bonus, protein target, sodium cap, and any rule flags (weight-loss rate, lean mass, lift progression, BP, hematocrit, CPAP, glucose, ApoB, HRV/resting HR, last night's sleep). " +
+      "Use when he asks what to eat, whether to lift, how much he has left today, or what to watch. Always uses the latest synced data.",
     inputSchema: { date: DateArg, refresh: z.boolean().default(false) },
   }, async ({ date, refresh }) => {
-    const d = day(date);
-    if (!refresh) {
-      const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
-      if (row) return ok({ ...JSON.parse(row.plan), source: "6 a.m. run" });
-    }
-    return ok({ ...(await evaluate(db, d)), source: "computed now (calorie adjustments only change in the 6 a.m. run)" });
+    // Always computed fresh: Oura sleep often lands after 6:00. Calorie adjustments only change in the 6:00 run.
+    return ok({ ...(await runRules(db, day(date), { apply: false })), source: "computed now" });
   });
 
   server.registerTool("get_review", {
