@@ -2,7 +2,7 @@
 // evaluate() is read-only. applyRule1() is the only thing that changes a setting,
 // and it runs from the morning cron (or run_rules with apply=true).
 import { addDays, chicagoDate } from "./util.js";
-import { modelSummary } from "./models.js";
+import { modelSummary, runModels } from "./models.js";
 
 const all = async (db, sql, ...b) => (await db.prepare(sql).bind(...b).all()).results || [];
 const first = (db, sql, ...b) => db.prepare(sql).bind(...b).first();
@@ -266,6 +266,9 @@ export async function evaluate(db, date = chicagoDate()) {
   const training_call = calls.includes("zone2") ? "Zone 2 only, no heavy lifting" : calls.includes("lighter") ? "Lift lighter: no top sets or PRs" : "Train as planned";
   const lastW = await first(db, "SELECT weight FROM days WHERE weight IS NOT NULL AND date<=? ORDER BY date DESC LIMIT 1", date);
   // Calorie target comes from the weekly model (brief 2.3). calorie_base is only the seed.
+  // Models normally run at 6:00. If today's haven't (first deploy, a failed cron), run them now.
+  const have = await first(db, "SELECT 1 x FROM model_outputs WHERE model='weight_trend' AND date=?", date);
+  if (!have && date <= chicagoDate()) await runModels(db, date);
   const models = await modelSummary(db, date);
   const modelTarget = models.weekly_target && models.weekly_target.value;
   const calorie_target = modelTarget != null ? modelTarget : Math.max(st.calorie_floor, st.calorie_base + st.calorie_adjust);
