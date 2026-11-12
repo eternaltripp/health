@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "health",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+
+  // 6:00 a.m. Central. Cron runs in UTC, and Central shifts between UTC-6 (CST)
+  // and UTC-5 (CDT). Both hours fire; the handler only runs the one where the
+  // Chicago wall clock reads 6 a.m.
+  "triggers": { "crons": ["0 11 * * *", "0 12 * * *"] },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "health-db",
+      "database_id": "4e5d20b0-bc5d-4b47-a420-4e1fc79a3959",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Reused from the old connector so the Oura login carries over.
+  "kv_namespaces": [
+    { "binding": "OURA_KV", "id": "92f361145826451e8e2fb728ea34a474" }
+  ],
+
+  // Load .sql files as text so the worker can apply its own migrations.
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
+
+  "vars": {
+    // "1" exposes the one-time import_tracker MCP tool. Set to "0" after migration.
+    "IMPORT_ENABLED": "1",
+    // "1" re-enables the /auth Oura login route. Off by default so nobody can
+    // link a different Oura account over the saved tokens.
+    "OURA_AUTH_ENABLED": "0"
+  }
+  // Secrets (set in the Cloudflare dashboard, never in this file):
+  // CLIENT_ID, CLIENT_SECRET, MYAIR_EMAIL, MYAIR_PASSWORD, MCP_TOKEN, NTFY_TOPIC
+}
