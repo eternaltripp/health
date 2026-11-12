@@ -5,8 +5,8 @@ import { addDays, round1 } from "./util.js";
 const OURA_AUTH = "https://cloud.ouraring.com/oauth/authorize";
 const OURA_TOKEN = "https://api.ouraring.com/oauth/token";
 const OURA_API = "https://api.ouraring.com/v2/usercollection";
-// heart_health = VO2 max + cardiovascular age (FROM MEMORY: Oura scope name, confirm at re-auth). spo2 and workout added for later.
-const SCOPES = "personal daily heartrate workout spo2 heart_health";
+// heart_health = VO2 max + cardiovascular age (RESEARCHED: openwearables.io Oura guide lists it as an Oura scope). The scope must also be ticked on the app at cloud.ouraring.com/oauth/applications.
+const SCOPES = "personal daily heartrate heart_health";
 
 export function authUrl(env, redirectUri, state) {
   const p = new URLSearchParams({
