@@ -216,3 +216,51 @@ export async function exerciseHistory(db, limit = 40) {
   }
   return out;
 }
+
+// ---------- phase 2-4 writes ----------
+
+export async function logScan(db, s) {
+  await db.prepare(`INSERT INTO scans (date, weight, smm, bfm, pbf, lean_mass, trunk_fat, visceral, raw) VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(date) DO UPDATE SET weight=excluded.weight, smm=excluded.smm, bfm=excluded.bfm, pbf=excluded.pbf, lean_mass=excluded.lean_mass,
+      trunk_fat=excluded.trunk_fat, visceral=excluded.visceral, raw=excluded.raw`)
+    .bind(s.date, s.weight ?? null, s.smm ?? null, s.bfm ?? null, s.pbf ?? null, s.lean_mass ?? null, s.trunk_fat ?? null, s.visceral ?? null, s.raw ? JSON.stringify(s.raw) : null).run();
+  return first(db, "SELECT * FROM scans WHERE date=?", s.date);
+}
+
+export async function logEye(db, e) {
+  await db.prepare(`INSERT INTO eye (date, injection, drug, interval_weeks, oct_thickness, note) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(date) DO UPDATE SET injection=excluded.injection, drug=excluded.drug, interval_weeks=excluded.interval_weeks, oct_thickness=excluded.oct_thickness, note=excluded.note`)
+    .bind(e.date, e.injection ? 1 : 0, e.drug ?? null, e.interval_weeks ?? null, e.oct_thickness ?? null, e.note ?? null).run();
+  return first(db, "SELECT * FROM eye WHERE date=?", e.date);
+}
+
+export async function logGlucose(db, readings, source, toDate) {
+  const s = readings.map((r) => db.prepare("INSERT INTO glucose (ts, date, mg_dl, source) VALUES (?,?,?,?) ON CONFLICT(ts) DO UPDATE SET mg_dl=excluded.mg_dl, source=excluded.source")
+    .bind(r.ts, toDate(r.ts), r.mg_dl, source || "manual"));
+  for (let i = 0; i < s.length; i += 100) await db.batch(s.slice(i, i + 100));
+  return readings.length;
+}
+
+export async function getGlucose(db, date) {
+  const rows = await all(db, "SELECT ts, mg_dl FROM glucose WHERE date=? ORDER BY ts", date);
+  const v = rows.map((r) => r.mg_dl);
+  return { date, readings: rows.length, mean: v.length ? r1(v.reduce((a, b) => a + b, 0) / v.length) : null, peak: v.length ? Math.max(...v) : null, over_140: v.filter((x) => x > 140).length, series: rows };
+}
+
+export const SETTING_KEYS = ["calorie_base", "calorie_floor", "calorie_adjust", "protein_target", "step_baseline", "sodium_cap_default", "sodium_cap_low", "apob_target", "wine_weekly_cap", "push_enabled"];
+export async function setSetting(db, key, value) {
+  if (!SETTING_KEYS.includes(key)) throw new Error("unknown setting " + key);
+  await db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?,?,datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')").bind(key, value == null ? "" : String(value)).run();
+}
+export async function listSettings(db) {
+  return all(db, "SELECT key, value, note, updated_at FROM settings ORDER BY key");
+}
+export async function setLiftTarget(db, t) {
+  await db.prepare(`INSERT INTO lift_targets (exercise, rep_low, rep_high, increment_lb, note, updated_at) VALUES (?,?,?,?,?,datetime('now'))
+    ON CONFLICT(exercise) DO UPDATE SET rep_low=excluded.rep_low, rep_high=excluded.rep_high, increment_lb=excluded.increment_lb, note=excluded.note, updated_at=datetime('now')`)
+    .bind(t.exercise, t.rep_low, t.rep_high, t.increment_lb ?? 5, t.note ?? null).run();
+  return all(db, "SELECT * FROM lift_targets ORDER BY exercise");
+}
+export async function listLiftTargets(db) {
+  return all(db, "SELECT * FROM lift_targets ORDER BY exercise");
+}

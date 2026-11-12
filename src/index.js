@@ -2,12 +2,13 @@ import { ensureSchema } from "./schema.js";
 import { handleMcp } from "./mcp.js";
 import { syncAll } from "./sync.js";
 import { authUrl, exchangeCode } from "./oura.js";
-import { chicagoHour, chicagoDate, json, html, safeEqual, notify } from "./util.js";
+import { chicagoHour, chicagoMinute, chicagoDate, json, html, safeEqual, notify } from "./util.js";
+import { runRules, pushText } from "./rules.js";
 import { verifyAccess } from "./access.js";
 import { handleApi } from "./api.js";
 import APP_HTML from "./app.html";
 
-const VERSION = "phase1.1-2026-11-11";
+const VERSION = "phase4-2026-11-11";
 
 export default {
   async fetch(request, env, ctx) {
@@ -28,6 +29,13 @@ export default {
         }
         await ensureSchema(env.DB);
         return handleMcp(request, env);
+      }
+
+      // Local-only test hook for the 6:00/6:30 jobs (wrangler dev ignores cron times).
+      if (path === "/__dev/morning" && env.DEV_NO_ACCESS === "1" && url.hostname === "localhost") {
+        const when = new Date(url.searchParams.get("time") || Date.now());
+        if (url.searchParams.get("step") === "push") { await morningPush(env, when); return json({ pushed: true }); }
+        await morningSync(env); return json({ synced: true });
       }
 
       // Web page + its API. Locked to Cloudflare Access; the worker verifies the
@@ -76,15 +84,35 @@ export default {
     }
   },
 
-  // Two UTC crons cover CST and CDT; run only the one that lands on 6 a.m. Chicago.
+  // UTC crons at :00 and :30 of 11 and 12 cover CST and CDT. Only the run that
+  // lands on 6:00 / 6:30 Chicago does anything.
   async scheduled(event, env, ctx) {
-    const hour = chicagoHour(new Date(event.scheduledTime));
+    const when = new Date(event.scheduledTime);
+    const hour = chicagoHour(when), minute = chicagoMinute(when);
     if (hour !== 6) return;
-    ctx.waitUntil((async () => {
-      await ensureSchema(env.DB);
-      const r = await syncAll(env, { days: 7, trigger: "cron" });
-      const bad = [r.oura && !r.oura.ok && "Oura", r.cpap && !r.cpap.ok && "CPAP"].filter(Boolean);
-      if (bad.length) await notify(env, `Health sync problem: ${bad.join(" and ")}. Run sync_now to see details.`);
-    })());
+    ctx.waitUntil(minute < 15 ? morningSync(env) : morningPush(env, when));
   },
 };
+
+// 6:00: pull Oura/CPAP/Withings, then run rules (rule 1 may adjust calories).
+export async function morningSync(env) {
+  await ensureSchema(env.DB);
+  const r = await syncAll(env, { days: 7, trigger: "cron" });
+  const bad = [r.oura && !r.oura.ok && "Oura", r.cpap && !r.cpap.ok && "CPAP", r.withings && !r.withings.ok && "Withings"].filter(Boolean);
+  if (bad.length) await notify(env, `Health sync problem: ${bad.join(" and ")}. Run sync_now to see details.`);
+  await runRules(env.DB, chicagoDate(), { apply: true });
+}
+
+// 6:30: push the plan. Sundays also say the review is ready.
+export async function morningPush(env, when = new Date()) {
+  await ensureSchema(env.DB);
+  const date = chicagoDate(when);
+  const st = await env.DB.prepare("SELECT value FROM settings WHERE key='push_enabled'").first();
+  if (st && st.value === "0") return;
+  let row = await env.DB.prepare("SELECT plan FROM plans WHERE date=?").bind(date).first();
+  const plan = row ? JSON.parse(row.plan) : await runRules(env.DB, date, { apply: true });
+  await notify(env, pushText(plan), "Today");
+  const dow = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(when);
+  if (dow === "Sun") await notify(env, "Weekly review is ready. Ask Claude for your Sunday review or open the Week tab.", "Sunday review");
+  await env.DB.prepare("UPDATE plans SET pushed_at=datetime('now') WHERE date=?").bind(date).run();
+}

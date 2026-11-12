@@ -32,7 +32,8 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute
 .datebar{display:flex;justify-content:space-between;align-items:center}
 .datebar button{width:44px;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:20px}
 .datebar .d{font-weight:600;font-size:18px;text-align:center}
-.score{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.score{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+#wkpis.score{grid-template-columns:repeat(2,1fr)}
 .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
 .big{font-family:var(--mono);font-size:24px}
 .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
@@ -71,6 +72,7 @@ svg text{fill:var(--muted);font:11px var(--mono)}
     <button data-v="today" aria-selected="true">Today</button>
     <button data-v="lift" aria-selected="false">Lift</button>
     <button data-v="week" aria-selected="false">Week</button>
+    <button data-v="body" aria-selected="false">Body</button>
   </nav>
 </div></header>
 
@@ -79,9 +81,17 @@ svg text{fill:var(--muted);font:11px var(--mono)}
 <section id="v-today">
   <div class="datebar"><button id="prev" aria-label="Previous day">‹</button><div class="d" id="dlabel"></div><button id="next" aria-label="Next day">›</button></div>
 
+  <div class="card" id="planCard">
+    <div class="row"><span class="lbl grow">Today's plan</span><span class="src" id="planSrc"></span></div>
+    <div id="planCall" style="font-weight:700;font-size:18px"></div>
+    <div id="planLine" class="src"></div>
+    <div id="planWatch"></div>
+  </div>
+
   <div class="card score">
     <div><span class="lbl">Calories</span><div class="big" id="sCal">0</div><div class="bar"><i id="bCal"></i></div><span class="left" id="lCal"></span></div>
     <div><span class="lbl">Protein</span><div class="big" id="sPro">0g</div><div class="bar"><i id="bPro"></i></div><span class="left" id="lPro"></span></div>
+    <div><span class="lbl">Sodium</span><div class="big" id="sNa">–</div><span class="left" id="lNa"></span></div>
   </div>
 
   <div class="card" id="recovery">
@@ -176,12 +186,46 @@ svg text{fill:var(--muted);font:11px var(--mono)}
     <tbody id="wbody"></tbody></table></div>
   <h2>Weight, 28 days</h2>
   <div class="card" id="trend"></div>
+  <h2>Review</h2>
+  <div class="card" id="review"></div>
+</section>
+
+<!-- BODY -->
+<section id="v-body" hidden>
+  <h2>Key labs</h2>
+  <div class="card" id="labsCard"></div>
+  <h2>InBody scan</h2>
+  <div class="card">
+    <div class="row"><input id="scDate" type="date"><input id="scWt" inputmode="decimal" placeholder="Weight lb"></div>
+    <div class="row"><input id="scLean" inputmode="decimal" placeholder="Lean mass lb"><input id="scSmm" inputmode="decimal" placeholder="SMM lb"></div>
+    <div class="row"><input id="scBfm" inputmode="decimal" placeholder="Fat mass lb"><input id="scPbf" inputmode="decimal" placeholder="Body fat %"><input id="scVis" inputmode="decimal" placeholder="Visceral"></div>
+    <div class="row"><span class="grow"></span><button class="p" id="scSave">Save scan</button></div>
+    <div id="scList" class="src"></div>
+  </div>
+  <h2>Eye visit</h2>
+  <div class="card">
+    <div class="row"><input id="eyDate" type="date"><label class="row src" style="width:auto"><input type="checkbox" id="eyInj" style="width:20px;height:20px"> Injection</label></div>
+    <div class="row"><input id="eyDrug" placeholder="Drug"><input id="eyInt" inputmode="decimal" placeholder="Weeks since last"><input id="eyOct" inputmode="numeric" placeholder="OCT µm"></div>
+    <input id="eyNote" placeholder="Note">
+    <div class="row"><span class="grow"></span><button class="p" id="eySave">Save visit</button></div>
+    <div id="eyList" class="src"></div>
+  </div>
+  <h2>Glucose</h2>
+  <div class="card">
+    <div class="row"><input id="glV" inputmode="numeric" placeholder="mg/dL now"><button class="p" id="glAdd">Add</button></div>
+    <div id="glToday" class="src"></div>
+    <div class="src">CGM exports: send the file to Claude and it logs them in bulk.</div>
+  </div>
+  <h2>Withings</h2>
+  <div class="card" id="wiCard"></div>
+  <h2>Targets</h2>
+  <div class="card" id="setCard"></div>
 </section>
 </main>
 <div class="toast" id="toast"></div>
 
 <script>
-const TARGET = { cal: 1900, pro: 230 };  // from the build spec targets
+const TARGET = { cal: 1900, pro: 230 };  // replaced by the plan from /api/plan on load
 // Templates carried over from the old Fuel Log tracker (its own numbers).
 const TEMPLATES = [
   { n: "Greek yogurt + berries", c: 340, p: 47, m: "breakfast" },
@@ -207,7 +251,7 @@ const parse = (s) => { const [a, b, c] = s.split("-").map(Number); return new Da
 const addDays = (s, n) => { const d = parse(s); d.setDate(d.getDate() + n); return ymd(d); };
 const fmt = (s, o) => parse(s).toLocaleDateString(undefined, o);
 const today = () => ymd(new Date());
-let cur = today(), wkEnd = today(), dayData = null, exData = [];
+let cur = today(), wkEnd = today(), dayData = null, planData = null, exData = [];
 
 function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 1600); }
 async function api(path, body) {
@@ -221,21 +265,34 @@ async function api(path, body) {
 // ---------- tabs ----------
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
   document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", x === b));
-  for (const v of ["today", "lift", "week"]) $("v-" + v).hidden = v !== b.dataset.v;
+  for (const v of ["today", "lift", "week", "body"]) $("v-" + v).hidden = v !== b.dataset.v;
   if (b.dataset.v === "today") loadDay();
   if (b.dataset.v === "lift") loadLift();
   if (b.dataset.v === "week") loadWeek();
+  if (b.dataset.v === "body") loadBody();
 });
 
 // ---------- today ----------
 async function loadDay() {
   $("dlabel").textContent = (cur === today() ? "Today · " : "") + fmt(cur, { weekday: "short", month: "short", day: "numeric" });
   $("next").disabled = cur >= today();
-  dayData = await api("/api/day?date=" + cur);
+  [dayData, planData] = await Promise.all([api("/api/day?date=" + cur), api("/api/plan?date=" + cur)]);
+  TARGET.cal = planData.calorie_target; TARGET.pro = planData.protein_target;
   renderDay();
 }
 function renderDay() {
-  const d = dayData, t = d.food.totals;
+  const d = dayData, t = d.food.totals, p = planData;
+  const steps = (d.oura && d.oura.steps) || 0, over = Math.max(0, steps - p.step_baseline);
+  const bonus = Math.round(over / 1000 * p.step_bonus_per_1k_over_baseline);
+  TARGET.cal = p.calorie_target + bonus;
+  $("planCall").textContent = p.training_call;
+  $("planCall").style.color = /Zone 2/.test(p.training_call) ? "var(--warn)" : "var(--good)";
+  $("planLine").textContent = `Eat ${p.calorie_target.toLocaleString()} cal${bonus ? " + " + bonus + " step bonus" : ""} · ${p.protein_target} g protein · sodium under ${p.sodium_cap.toLocaleString()} mg` + (p.calorie_adjust ? ` · base adjusted ${p.calorie_adjust > 0 ? "+" : ""}${p.calorie_adjust}` : "");
+  $("planSrc").textContent = p.calorie_change ? "" : "";
+  $("planWatch").innerHTML = p.watch_items.length ? p.watch_items.map((w) => `<div class="item"><span><b style="color:${w.status === "urgent" || w.status === "act" ? "var(--bad)" : "var(--warn)"}">${esc(w.name)}</b><br><span class="s">${esc(w.message)}</span></span></div>`).join("") : '<span class="src">Nothing flagged.</span>';
+  $("sNa").textContent = t.sodium_mg != null ? Math.round(t.sodium_mg).toLocaleString() : "–";
+  $("lNa").textContent = t.sodium_mg != null ? (t.sodium_mg > p.sodium_cap ? "over cap" : Math.round(p.sodium_cap - t.sodium_mg).toLocaleString() + " left") + (t.sodium_missing_items ? ` · ${t.sodium_missing_items} items missing` : "") : "not logged";
+  $("lNa").className = "left" + (t.sodium_mg > p.sodium_cap ? " over" : "");
   $("sCal").textContent = Math.round(t.cal).toLocaleString();
   $("sPro").textContent = Math.round(t.protein_g) + "g";
   $("bCal").style.width = Math.min(100, t.cal / TARGET.cal * 100) + "%";
@@ -366,7 +423,44 @@ async function loadWeek() {
     k("CPAP", v(s.cpap_hours.avg, 1) + " h", "AHI " + v(s.ahi.avg, 1));
   $("wbody").innerHTML = w.days.map((d) => `<tr><td>${fmt(d.date, { weekday: "short" })}</td><td class="n">${v(d.cal)}</td><td class="n">${v(d.protein_g)}</td><td class="n">${d.weight ?? ""}</td><td class="n">${d.bp_sys ? d.bp_sys + "/" + d.bp_dia : ""}</td><td class="n">${d.readiness ?? ""}</td><td class="n">${d.hrv ?? ""}</td><td class="n">${d.cpap_hours ?? ""}</td><td class="n">${d.lift_sets || ""}</td></tr>`).join("");
   renderTrend(t.series);
+  const r = await api("/api/review?end=" + wkEnd);
+  const a = r.alcohol, sb = r.scoreboard;
+  $("review").innerHTML = `
+    <div><span class="lbl">Weight</span> ${r.weight.avg_7d ?? "–"} lb avg${r.weight.change_lb != null ? ` (${r.weight.change_lb > 0 ? "+" : ""}${r.weight.change_lb} vs prior week)` : ""}</div>
+    <div><span class="lbl">Protein</span> hit ${r.protein.days_hit}/${r.protein.days_logged} days</div>
+    <div><span class="lbl">Calories</span> ${r.calories.week_total.toLocaleString()} of ${r.calories.weekly_budget.toLocaleString()} budget</div>
+    <div><span class="lbl">Next week</span> ${r.next_week.calorie_target.toLocaleString()} cal/day · sodium under ${r.next_week.sodium_cap.toLocaleString()}</div>
+    <div><span class="lbl">Lifts</span>${r.lifts.length ? r.lifts.map((l) => `<div class="s">${esc(l.exercise)}: ${l.best_this_week}${l.best_before ? " (before: " + esc(l.best_before) + ")" : ""}</div>`).join("") : " none this week"}</div>
+    <div><span class="lbl">Alcohol vs next morning (60 days)</span><div class="s">${a.enough_data ? `HRV ${a.next_morning_hrv.after_drinks} after drinks vs ${a.next_morning_hrv.after_dry} dry · RHR ${a.next_morning_rhr.after_drinks} vs ${a.next_morning_rhr.after_dry}` : `Not enough data yet (${a.drink_nights} drink nights, ${a.dry_nights} dry)`}</div></div>
+    <div><span class="lbl">Flags</span>${r.watch_items.length ? r.watch_items.map((w) => `<div class="s">${esc(w.name)}: ${esc(w.message)}</div>`).join("") : " none"}</div>
+    <div><span class="lbl">Scoreboard</span><div class="s">Hct ${sb.hematocrit ? sb.hematocrit.value + " (" + sb.hematocrit.date + ")" : "–"} · ApoB ${typeof sb.apob === "string" ? sb.apob : sb.apob.value} · HDL ${sb.hdl ? sb.hdl.value : "–"} · lean mass ${sb.lean_mass ? sb.lean_mass.lean_mass : "no scan"} · eye interval ${sb.eye_weeks_between_injections ?? "–"} wk</div></div>`;
 }
+
+// ---------- body ----------
+async function loadBody() {
+  const b = await api("/api/body");
+  $("labsCard").innerHTML = b.key_labs.map((l) => `<div class="item"><span>${esc(l.test)}</span><span class="sets">${l.value ?? esc(l.value_text)}${l.flag ? " " + l.flag : ""} <span class="s">${l.date}</span></span></div>`).join("") + '<div class="src">ApoB and Lp(a) not tested yet. On the January list.</div>';
+  $("scList").innerHTML = b.scans.map((x) => `${x.date}: ${x.weight ?? "–"} lb, lean ${x.lean_mass ?? "–"}, fat ${x.pbf ?? "–"}%`).join("<br>") || "No scans yet.";
+  $("eyList").innerHTML = b.eye.map((x) => `${x.date}: ${x.injection ? "injection" : "no injection"}${x.drug ? " (" + esc(x.drug) + ")" : ""}${x.interval_weeks ? ", " + x.interval_weeks + " wk" : ""}${x.oct_thickness ? ", OCT " + x.oct_thickness : ""}`).join("<br>") || "No visits yet.";
+  const g = b.glucose_today;
+  $("glToday").textContent = g.readings ? `Today: ${g.readings} readings, mean ${g.mean}, peak ${g.peak}, ${g.over_140} over 140` : "No readings today.";
+  const w = b.withings;
+  $("wiCard").innerHTML = !w.configured ? '<span class="src">Not set up. Needs a Withings developer app (WITHINGS_CLIENT_ID / WITHINGS_CLIENT_SECRET secrets). Weight, BP and body comp then sync every morning.</span>'
+    : w.connected ? '<span class="src">Connected. Syncs at 6 a.m. with Oura and CPAP.</span>' : '<a class="g" href="/api/withings/auth" style="text-decoration:none;display:inline-block">Connect Withings</a>';
+  $("setCard").innerHTML = b.settings.filter((x) => !/changed/.test(x.key)).map((x) => `<div class="item"><span>${esc(x.key.replace(/_/g, " "))}<br><span class="s">${esc(x.note || "")}</span></span><span class="sets">${esc(x.value || "–")}</span></div>`).join("")
+    + '<div class="lbl" style="margin-top:8px">Rep ranges</div>' + b.lift_targets.map((t) => `<div class="s">${esc(t.exercise)}: ${t.rep_low}-${t.rep_high}, +${t.increment_lb} lb</div>`).join("")
+    + '<div class="src">Change any of these by asking Claude.</div>';
+  for (const id of ["scDate", "eyDate"]) if (!$(id).value) $(id).value = today();
+}
+$("scSave").onclick = async () => {
+  await api("/api/scan", { date: $("scDate").value, weight: $("scWt").value, lean_mass: $("scLean").value, smm: $("scSmm").value, bfm: $("scBfm").value, pbf: $("scPbf").value, visceral: $("scVis").value });
+  toast("Scan saved"); loadBody();
+};
+$("eySave").onclick = async () => {
+  await api("/api/eye", { date: $("eyDate").value, injection: $("eyInj").checked, drug: $("eyDrug").value, interval_weeks: $("eyInt").value, oct_thickness: $("eyOct").value, note: $("eyNote").value });
+  toast("Visit saved"); loadBody();
+};
+$("glAdd").onclick = async () => { await api("/api/glucose", { mg_dl: $("glV").value }); $("glV").value = ""; toast("Glucose saved"); loadBody(); };
 function renderTrend(pts) {
   if (pts.length < 2) { $("trend").innerHTML = '<span class="src">Not enough weigh-ins yet.</span>'; return; }
   const W = 320, H = 140, L = 36, R = 8, T = 10, B = 22, t0 = parse(pts[0].date).getTime(), t1 = parse(pts[pts.length - 1].date).getTime() || t0 + 1;

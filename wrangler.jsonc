@@ -9,10 +9,10 @@
   "keep_vars": true,
   "observability": { "enabled": true },
 
-  // 6:00 a.m. Central. Cron runs in UTC, and Central shifts between UTC-6 (CST)
-  // and UTC-5 (CDT). Both hours fire; the handler only runs the one where the
-  // Chicago wall clock reads 6 a.m.
-  "triggers": { "crons": ["0 11 * * *", "0 12 * * *"] },
+  // 6:00 sync and 6:30 push, Central. Cron runs in UTC and Central shifts between
+  // UTC-6 (CST) and UTC-5 (CDT), so both hours fire and the handler only acts
+  // when the Chicago wall clock reads 6:00 or 6:30.
+  "triggers": { "crons": ["0 11 * * *", "30 11 * * *", "0 12 * * *", "30 12 * * *"] },
 
   "d1_databases": [
     {

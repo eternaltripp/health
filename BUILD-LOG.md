@@ -57,6 +57,29 @@
 - Live check 11/11 22:30: page loads behind Access, no-login requests redirect to the Access login, connector unaffected.
 - Targets on the page (1,900 cal, 230 g) come from the build spec's targets section.
 
+## 2026-11-11: Phases 2-4
+
+### Built
+- `docs/phase2-rules-research.md`: every threshold sourced (RESEARCHED / SPEC / FROM MEMORY) and marked LIVE or NOT LIVE.
+- `src/rules.js`: rules 1-9 + alcohol report + step bonus. `evaluate()` is read-only; `runRules(apply)` stores the plan and one `rules_log` row per rule (idempotent per date); rule 1 is the only rule that changes a setting (calorie_adjust, max once per 14 days, never below the floor).
+- Cron now fires at :00 and :30 of 11 and 12 UTC: 6:00 CT sync + rules, 6:30 CT ntfy push (targets only), Sunday adds a "review ready" push.
+- `src/review.js`: weekly review, scoreboard, doctor/eye visit packet, body summary.
+- `src/withings.js`: OAuth (state-checked, behind Access at /api/withings/*) and getmeas sync into weight, BP and `body_comp`. Off until WITHINGS_CLIENT_ID/SECRET exist.
+- Migration 0002: settings (defaults INSERT OR IGNORE), lift_targets (seeded from notes), glucose, plans, body_comp.
+- MCP tools added: get_plan, get_review, get_visit_packet, send_push_now, log_scan, log_eye, log_glucose, get_glucose, get_settings, set_setting, set_lift_target (23 total).
+- Page: plan card + sodium on Today, review on Week, new Body tab (labs, scan, eye, glucose, Withings connect, targets).
+
+### Decisions
+- Research replaced three spec numbers: rule 1 lower band (0.5% BW/wk, not 0.5 lb), rule 2 lean-mass noise floor (2.5 lb), rule 9 HRV band (0.5 SD of ln rMSSD, not 15%).
+- Not live (no source): lift deload size, CPAP "<6 h" and leak, CGM "+40 spike". ApoB waits on a target from the cardiologist.
+- Withings body comp is stored apart from InBody scans; rule 2 only uses scans.
+- Local test hook `/__dev/morning` only answers on localhost with DEV_NO_ACCESS (wrangler dev ignores cron times).
+
+### Tested locally (synthetic data in the local DB only)
+- Every rule's act path fires with seeded data; with real data the rules report no_data/ok.
+- 6:00 job applied rule 1 once (-150), second run left it alone; rules_log stayed at 9 rows; 6:30 push stored pushed_at.
+- Withings mapping checked against the doc's encoding (value x 10^unit), keeps the first weigh-in of the day.
+
 ### Next
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.
 - Phase 2: researched rules, morning push, Sunday review.

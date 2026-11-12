@@ -11,6 +11,11 @@ export function chicagoDate(d = new Date()) {
 export function chicagoHour(d = new Date()) {
   return Number(hourFmt.format(d));
 }
+const minFmt = new Intl.DateTimeFormat("en-US", { timeZone: TZ, minute: "numeric" });
+/** 0-59 minute in Chicago. */
+export function chicagoMinute(d = new Date()) {
+  return Number(minFmt.format(d));
+}
 /** Add n days to a YYYY-MM-DD string (calendar math, no TZ drift). */
 export function addDays(ymd, n) {
   const [y, m, d] = ymd.split("-").map(Number);
@@ -50,9 +55,10 @@ export async function safeEqual(a, b) {
 }
 
 /** Short failure push. Never put health numbers in these. */
-export async function notify(env, msg) {
-  if (!env.NTFY_TOPIC) return;
+export async function notify(env, msg, title = "Health") {
+  if (!env.NTFY_TOPIC) return false;
   try {
-    await fetch("https://ntfy.sh/" + encodeURIComponent(env.NTFY_TOPIC), { method: "POST", body: msg });
-  } catch (_) {}
+    const r = await fetch("https://ntfy.sh/" + encodeURIComponent(env.NTFY_TOPIC), { method: "POST", body: msg, headers: { Title: title } });
+    return r.ok;
+  } catch (_) { return false; }
 }

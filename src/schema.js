@@ -3,8 +3,10 @@
 // recorded in wrangler's own d1_migrations table, so `wrangler d1 migrations
 // apply` stays in sync and will skip them.
 import m0001 from "../migrations/0001_init.sql";
+import m0002 from "../migrations/0002_phase2.sql";
 
-const MIGRATIONS = [["0001_init.sql", m0001]];
+// Statements are split on ";" so no string literal in a migration may contain one.
+const MIGRATIONS = [["0001_init.sql", m0001], ["0002_phase2.sql", m0002]];
 
 let ready = null; // per-isolate memo
 

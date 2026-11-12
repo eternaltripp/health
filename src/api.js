@@ -2,6 +2,11 @@
 import { chicagoDate, isYmd, json } from "./util.js";
 import { getDay, getWeek, getTrends, upsertDay, logFood, logLift, logBp, deleteEntry, exerciseHistory } from "./data.js";
 import { syncAll } from "./sync.js";
+import { evaluate } from "./rules.js";
+import { getReview, bodySummary, visitPacket } from "./review.js";
+import { logScan, logEye, logGlucose, getGlucose, listSettings, listLiftTargets } from "./data.js";
+import { withingsConfigured, withingsStatus, withingsAuthUrl, withingsCallback } from "./withings.js";
+import { html } from "./util.js";
 
 // Per-can numbers: 130 cal / 30 g are the old tracker's; 95 mg sodium is from the
 // "x4 (Genius Gourmet)" entry already in the log (380 mg for 4).
@@ -25,6 +30,22 @@ export async function handleApi(request, env, path) {
       return json(await getTrends(db, q("metric") || "weight", days));
     }
     if (path === "/api/exercises") return json({ exercises: await exerciseHistory(db) });
+    if (path === "/api/plan") {
+      const d = date(q("date"));
+      const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
+      return json(row ? JSON.parse(row.plan) : await evaluate(db, d));
+    }
+    if (path === "/api/review") return json(await getReview(db, date(q("end"))));
+    if (path === "/api/visit") return json(await visitPacket(db, date(q("end")), num(q("days") || 30, 7, 365) || 30));
+    if (path === "/api/body") return json({ ...(await bodySummary(db)), glucose_today: await getGlucose(db, chicagoDate()), withings: await withingsStatus(env), settings: await listSettings(db), lift_targets: await listLiftTargets(db) });
+    if (path === "/api/withings/auth") {
+      if (!withingsConfigured(env)) return html("<h2>Withings isn't set up</h2><p>Add WITHINGS_CLIENT_ID and WITHINGS_CLIENT_SECRET secrets first.</p>", 400);
+      return Response.redirect(await withingsAuthUrl(env, url.origin + "/api/withings/callback"), 302);
+    }
+    if (path === "/api/withings/callback") {
+      try { await withingsCallback(env, url, url.origin + "/api/withings/callback"); return html("<h2>Withings connected.</h2><p><a href='/app'>Back to the app</a></p>"); }
+      catch (e) { return html("<h2>Withings connection failed</h2><p>" + String(e.message || e).replace(/[<>&]/g, "") + "</p>", 400); }
+    }
   }
 
   if (request.method === "POST") {
@@ -86,6 +107,20 @@ export async function handleApi(request, env, path) {
       const total = after.reduce((a, r) => a + count(r), 0);
       await upsertDay(db, d, { cans: total });
       return json({ cans: total });
+    }
+    if (path === "/api/scan") {
+      if (!isYmd(body.date)) return bad("date required");
+      const f = {}; for (const k of ["weight", "smm", "bfm", "pbf", "lean_mass", "trunk_fat", "visceral"]) f[k] = body[k] === "" || body[k] == null ? null : num(body[k], 0, 1000);
+      return json({ saved: await logScan(db, { date: body.date, ...f }) });
+    }
+    if (path === "/api/eye") {
+      if (!isYmd(body.date)) return bad("date required");
+      return json({ saved: await logEye(db, { date: body.date, injection: !!body.injection, drug: body.drug || null, interval_weeks: body.interval_weeks ? num(body.interval_weeks, 0, 52) : null, oct_thickness: body.oct_thickness ? num(body.oct_thickness, 0, 2000) : null, note: body.note || null }) });
+    }
+    if (path === "/api/glucose") {
+      const mg = num(body.mg_dl, 20, 600); if (mg == null) return bad("mg_dl required");
+      const ts = new Date().toISOString();
+      return json({ saved: await logGlucose(db, [{ ts, mg_dl: mg }], "manual", (t) => chicagoDate(new Date(t))) });
     }
     if (path === "/api/sync") return json(await syncAll(env, { days: 2, trigger: "web" }));
   }

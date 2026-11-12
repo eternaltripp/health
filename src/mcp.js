@@ -4,6 +4,9 @@ import { z } from "zod";
 import { chicagoDate, addDays, isYmd } from "./util.js";
 import { upsertDay, appendNote, foodTotals, getDay, getWeek, getTrends, getLabs, getMeds, getLifts, TREND_METRICS, logFood, logLift, logBp, deleteEntry } from "./data.js";
 import { syncAll } from "./sync.js";
+import { evaluate, runRules } from "./rules.js";
+import { getReview, visitPacket } from "./review.js";
+import { logScan, logEye, logGlucose, getGlucose, setSetting, listSettings, setLiftTarget, listLiftTargets, SETTING_KEYS } from "./data.js";
 
 const DateArg = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
   .describe("YYYY-MM-DD (America/Chicago). Omit for today.");
@@ -177,6 +180,109 @@ function buildServer(env) {
     const row = await deleteEntry(db, kind, id);
     return row ? ok({ deleted: row }) : fail(`no ${kind} with id ${id}`);
   });
+
+
+  // ---------------- phase 2: plan, rules, review ----------------
+  server.registerTool("get_plan", {
+    title: "Today's plan",
+    description:
+      "Today's training call (train as planned vs Zone 2), calorie target, step bonus, protein target, sodium cap, and any rule flags (weight-loss rate, lean mass, lift progression, BP, hematocrit, CPAP, glucose, ApoB, HRV/resting HR). " +
+      "Use when he asks what to eat, whether to lift, how much he has left today, or what to watch. refresh=true re-runs the rules now instead of using the 6 a.m. result.",
+    inputSchema: { date: DateArg, refresh: z.boolean().default(false) },
+  }, async ({ date, refresh }) => {
+    const d = day(date);
+    if (!refresh) {
+      const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
+      if (row) return ok({ ...JSON.parse(row.plan), source: "6 a.m. run" });
+    }
+    return ok({ ...(await evaluate(db, d)), source: "computed now (calorie adjustments only change in the 6 a.m. run)" });
+  });
+
+  server.registerTool("get_review", {
+    title: "Weekly review",
+    description: "Sunday-style review for the 7 days ending end_date: weight trend, lean mass, lift bests, BP average, protein days hit, calories vs budget, next week's targets, rule flags, alcohol vs next-morning HRV/RHR, and the scoreboard.",
+    inputSchema: { end_date: DateArg },
+  }, async ({ end_date }) => ok(await getReview(db, day(end_date))));
+
+  server.registerTool("get_visit_packet", {
+    title: "Doctor visit packet",
+    description: "Summary to bring to a doctor or eye visit: home BP average, recent hematocrit, CPAP compliance and AHI, weight change, Oura averages, active meds, eye history. Default last 30 days.",
+    inputSchema: { end_date: DateArg, days: z.number().int().min(7).max(365).default(30) },
+  }, async ({ end_date, days }) => ok(await visitPacket(db, day(end_date), days)));
+
+  server.registerTool("send_push_now", {
+    title: "Send today's plan push now",
+    description: "Send the morning plan notification (training call, calorie target, sodium cap, top watch item) to his phone right now. Use only when he asks to test or resend the push.",
+    inputSchema: {},
+  }, async () => {
+    const { runRules: rr, pushText: pt } = await import("./rules.js");
+    const d = chicagoDate();
+    const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
+    const plan = row ? JSON.parse(row.plan) : await rr(db, d, { apply: false });
+    const { notify } = await import("./util.js");
+    const sent = await notify(env, pt(plan), "Today");
+    return sent ? ok({ sent: true, text: pt(plan) }) : fail("Push failed or NTFY_TOPIC missing.");
+  });
+
+  // ---------------- phase 4: body data ----------------
+  server.registerTool("log_scan", {
+    title: "Log a body scan (InBody)",
+    description: "Record an InBody or similar body-composition scan. Weights in lb. smm = skeletal muscle mass, bfm = body fat mass, pbf = percent body fat, lean_mass = fat-free/lean mass.",
+    inputSchema: {
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      weight: z.number().optional(), smm: z.number().optional(), bfm: z.number().optional(), pbf: z.number().optional(),
+      lean_mass: z.number().optional(), trunk_fat: z.number().optional(), visceral: z.number().optional(),
+      raw: z.record(z.any()).optional().describe("Any other fields from the printout"),
+    },
+  }, async (a) => ok({ saved: await logScan(db, a) }));
+
+  server.registerTool("log_eye", {
+    title: "Log an eye visit",
+    description: "Record a retina/eye visit: whether he got an injection, the drug, the interval in weeks since the last one, OCT central thickness, and notes.",
+    inputSchema: {
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), injection: z.boolean(), drug: z.string().optional(),
+      interval_weeks: z.number().optional(), oct_thickness: z.number().optional(), note: z.string().optional(),
+    },
+  }, async (a) => ok({ saved: await logEye(db, a) }));
+
+  server.registerTool("log_glucose", {
+    title: "Log glucose readings",
+    description: "Record one or many glucose readings (mg/dL) with timestamps, e.g. from a CGM export (Lingo, Stelo) or a finger stick. Re-sending the same timestamp overwrites, never duplicates.",
+    inputSchema: {
+      readings: z.array(z.object({ ts: z.string().describe("ISO timestamp"), mg_dl: z.number().min(20).max(600) })).min(1).max(2000),
+      source: z.string().optional().describe("e.g. 'lingo', 'stelo', 'fingerstick'"),
+    },
+  }, async ({ readings, source }) => {
+    const bad = readings.find((r) => isNaN(new Date(r.ts)));
+    if (bad) return fail("bad timestamp: " + bad.ts);
+    const n = await logGlucose(db, readings.map((r) => ({ ts: new Date(r.ts).toISOString(), mg_dl: r.mg_dl })), source, (ts) => chicagoDate(new Date(ts)));
+    return ok({ saved: n });
+  });
+
+  server.registerTool("get_glucose", {
+    title: "Get glucose for a day",
+    description: "Glucose readings for one day with mean, peak, and count over 140 mg/dL.",
+    inputSchema: { date: DateArg },
+  }, async ({ date }) => ok(await getGlucose(db, day(date))));
+
+  // ---------------- settings ----------------
+  server.registerTool("get_settings", {
+    title: "Get targets and settings",
+    description: "Current calorie base/floor/adjustment, protein target, step baseline, sodium caps, ApoB target, wine cap, push on/off, and per-exercise rep ranges used by the lift progression rule.",
+    inputSchema: {},
+  }, async () => ok({ settings: await listSettings(db), lift_targets: await listLiftTargets(db) }));
+
+  server.registerTool("set_setting", {
+    title: "Change a target or setting",
+    description: "Change one setting. Only when he explicitly asks. Keys: " + SETTING_KEYS.join(", ") + ". Use an empty string to clear (e.g. apob_target).",
+    inputSchema: { key: z.enum(SETTING_KEYS), value: z.string() },
+  }, async ({ key, value }) => { await setSetting(db, key, value); return ok({ key, value }); });
+
+  server.registerTool("set_lift_target", {
+    title: "Set an exercise's rep range",
+    description: "Set the target rep range (and load step in lb) for an exercise. The progression rule suggests adding weight when every working set hits rep_high two sessions in a row.",
+    inputSchema: { exercise: z.string().min(1), rep_low: z.number().int().min(1), rep_high: z.number().int().min(1), increment_lb: z.number().positive().optional(), note: z.string().optional() },
+  }, async (a) => ok({ lift_targets: await setLiftTarget(db, a) }));
 
   return server;
 }
