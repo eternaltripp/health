@@ -82,7 +82,7 @@ export async function pushoverDetail(env, msg, title) {
     const r = await fetch("https://api.pushover.net/1/messages.json", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token: env.PUSHOVER_TOKEN, user: env.PUSHOVER_USER, message: msg, title }),
+      body: new URLSearchParams({ token: String(env.PUSHOVER_TOKEN).trim(), user: String(env.PUSHOVER_USER).trim(), message: msg, title }),
     });
     const j = await r.json().catch(() => ({}));
     return { ok: r.ok && j.status === 1, channel: "pushover", status: r.status, reason: j.errors ? j.errors.join("; ") : null };
