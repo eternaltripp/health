@@ -109,6 +109,7 @@ svg text{fill:var(--muted);font:11px var(--mono)}
 
   <h2>Quick add</h2>
   <div class="chips" id="templates"></div>
+  <div class="chips" id="savedMeals"></div>
 
   <h2>Add food</h2>
   <div class="card">
@@ -121,6 +122,7 @@ svg text{fill:var(--muted);font:11px var(--mono)}
     <div class="row">
       <select id="fMeal" class="grow"><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option><option value="shake">Shake</option><option value="other">Other</option></select>
       <label class="row src" style="width:auto"><input type="checkbox" id="fExact" style="width:20px;height:20px"> Label</label>
+      <label class="row src" style="width:auto"><input type="checkbox" id="fRest" style="width:20px;height:20px"> Restaurant</label>
       <button class="p" id="fAdd">Add</button>
     </div>
     <div class="src">Need an estimate? Ask Claude in chat and it logs it here.</div>
@@ -137,6 +139,10 @@ svg text{fill:var(--muted);font:11px var(--mono)}
     <div class="row"><span class="grow">Water (oz)</span><input id="nWater" inputmode="numeric" style="max-width:110px"><button class="g" data-save="water_oz">Save</button></div>
     <div class="row"><span class="grow">Wine (glasses)</span><input id="nWine" inputmode="decimal" style="max-width:110px"><button class="g" data-save="wine_glasses">Save</button></div>
     <div class="row"><span class="grow">Sauna (min)</span><input id="nSauna" inputmode="numeric" style="max-width:110px"><button class="g" data-save="sauna_min">Save</button></div>
+    <div class="row"><span class="grow">Caffeine (mg)</span><input id="nCaf" inputmode="numeric" style="max-width:110px"><button class="g" data-save="caffeine_mg">Save</button></div>
+    <div class="row"><span class="grow">Last caffeine</span><input id="nCafT" type="time" style="max-width:130px"><button class="g" data-save="caffeine_last_time">Save</button></div>
+    <div class="row"><span class="grow">Last meal</span><input id="nMealT" type="time" style="max-width:130px"><button class="g" data-save="last_meal_time">Save</button></div>
+    <div class="row"><span class="grow">Waist (in)</span><input id="nWaist" inputmode="decimal" style="max-width:110px"><button class="g" data-save="waist_in">Save</button></div>
   </div>
 
   <h2>Note</h2>
@@ -180,6 +186,7 @@ svg text{fill:var(--muted);font:11px var(--mono)}
 <!-- WEEK -->
 <section id="v-week" hidden>
   <div class="datebar"><button id="wprev" aria-label="Previous week">‹</button><div class="d" id="wlabel"></div><button id="wnext" aria-label="Next week">›</button></div>
+  <div class="card score" id="models"></div>
   <div class="card score" id="wkpis"></div>
   <div class="card tbl"><table>
     <thead><tr><th>Day</th><th>Cal</th><th>Pro</th><th>Wt</th><th>BP</th><th>Rdy</th><th>HRV</th><th>CPAP</th><th>Lift</th></tr></thead>
@@ -192,6 +199,10 @@ svg text{fill:var(--muted);font:11px var(--mono)}
 
 <!-- BODY -->
 <section id="v-body" hidden>
+  <h2>Scorecard</h2>
+  <div class="card" id="scoreCard"></div>
+  <h2>Capacity tests</h2>
+  <div class="card" id="capCard"></div>
   <h2>Key labs</h2>
   <div class="card" id="labsCard"></div>
   <h2>InBody scan</h2>
@@ -219,7 +230,7 @@ svg text{fill:var(--muted);font:11px var(--mono)}
   <h2>Withings</h2>
   <div class="card" id="wiCard"></div>
   <h2>Morning push</h2>
-  <div class="card"><div class="row"><span class="grow src">Sends at 6:30 a.m. Central. Test it now:</span><button class="g" id="pushBtn">Send test push</button></div></div>
+  <div class="card"><div class="row"><span class="grow src">Sends from 6:00 a.m. Central once Oura sleep is in (last try 9:00). Test it now:</span><button class="g" id="pushBtn">Send test push</button></div></div>
   <h2>Targets</h2>
   <div class="card" id="setCard"></div>
 </section>
@@ -312,12 +323,13 @@ function renderDay() {
 
   $("canN").textContent = d.food.items.filter((f) => /^Sparkling protein can/i.test(f.name)).reduce((a, f) => { const m = /x(\d+)/i.exec(f.name); return a + (m ? +m[1] : 1); }, 0);
   $("foodList").innerHTML = d.food.items.length ? d.food.items.map((f) =>
-    `<div class="item"><span>${esc(f.name)}<br><span class="s">${f.meal} · ${Math.round(f.cal)} cal · ${Math.round(f.protein_g)}g${f.sodium_mg != null ? " · " + Math.round(f.sodium_mg) + " mg Na" : ""}${f.est ? " · est" : ""}</span></span><button class="x" data-del="food:${f.id}" aria-label="Delete">×</button></div>`).join("")
+    `<div class="item"><span>${esc(f.name)}<br><span class="s">${f.meal} · ${Math.round(f.cal)} cal · ${Math.round(f.protein_g)}g${f.sodium_mg != null ? " · " + Math.round(f.sodium_mg) + " mg Na" : ""}${f.est ? " · est" : ""}${f.restaurant ? " · restaurant" : ""}</span></span><button class="x" data-del="food:${f.id}" aria-label="Delete">×</button></div>`).join("")
     : '<span class="src">Nothing logged yet.</span>';
 
   const day = d.day || {};
   $("nWt").value = day.weight ?? ""; $("nWater").value = day.water_oz ?? ""; $("nWine").value = day.wine_glasses ?? ""; $("nSauna").value = day.sauna_min ?? "";
   $("nNote").value = day.note ?? "";
+  $("nCaf").value = day.caffeine_mg ?? ""; $("nCafT").value = day.caffeine_last_time ?? ""; $("nMealT").value = day.last_meal_time ?? ""; $("nWaist").value = day.waist_in ?? "";
   $("bpList").innerHTML = d.bp.map((b) => `<span class="row">${new Date(b.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}: ${b.sys}/${b.dia}${b.pulse ? " · " + b.pulse : ""} <button class="x" data-del="bp:${b.id}" aria-label="Delete">×</button></span>`).join("");
 }
 async function cans(delta) { await api("/api/cans", { date: cur, delta }); loadDay(); }
@@ -336,9 +348,9 @@ $("templates").onclick = async (e) => {
 $("fAdd").onclick = async () => {
   const name = $("fName").value.trim(), cal = $("fCal").value, pro = $("fPro").value;
   if (!name || cal === "" || pro === "") return toast("Name, calories and protein");
-  await api("/api/food", { date: cur, meal: $("fMeal").value, items: [{ name, cal: +cal, protein_g: +pro, sodium_mg: $("fNa").value, est: !$("fExact").checked }] });
+  await api("/api/food", { date: cur, meal: $("fMeal").value, items: [{ name, cal: +cal, protein_g: +pro, sodium_mg: $("fNa").value, est: !$("fExact").checked, restaurant: $("fRest").checked }] });
   for (const id of ["fName", "fCal", "fPro", "fNa"]) $(id).value = "";
-  $("fExact").checked = false; toast("Added"); loadDay();
+  $("fExact").checked = false; $("fRest").checked = false; toast("Added"); loadDay();
 };
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-del]"); if (!b) return;
@@ -350,7 +362,18 @@ document.addEventListener("click", async (e) => {
 // two-tap delete instead of a browser dialog
 function confirmDel(b) { if (b.dataset.armed) return true; b.dataset.armed = 1; b.textContent = "✓"; b.style.color = "var(--bad)"; setTimeout(() => { delete b.dataset.armed; b.textContent = "×"; b.style.color = ""; }, 2500); return false; }
 
-const FIELD_INPUT = { weight: "nWt", water_oz: "nWater", wine_glasses: "nWine", sauna_min: "nSauna" };
+const FIELD_INPUT = { weight: "nWt", water_oz: "nWater", wine_glasses: "nWine", sauna_min: "nSauna", caffeine_mg: "nCaf", caffeine_last_time: "nCafT", last_meal_time: "nMealT", waist_in: "nWaist" };
+// saved meals: one tap logs the whole meal
+async function loadSaved() {
+  const r = await api("/api/saved_meals");
+  $("savedMeals").innerHTML = r.saved_meals.map((m) => `<button class="chip" data-sm="${esc(m.name)}">★ ${esc(m.name)} <small>${Math.round(m.totals.cal)}/${Math.round(m.totals.protein_g)}g</small></button>`).join("");
+}
+$("savedMeals").onclick = async (e) => {
+  const b = e.target.closest("[data-sm]"); if (!b) return;
+  await api("/api/saved_meal/log", { date: cur, name: b.dataset.sm });
+  toast("Logged " + b.dataset.sm); loadDay();
+};
+loadSaved().catch(() => {});
 document.querySelectorAll("[data-save]").forEach((b) => b.onclick = async () => {
   const k = b.dataset.save; await api("/api/day", { date: cur, [k]: $(FIELD_INPUT[k]).value }); toast("Saved");
 });
@@ -416,6 +439,11 @@ async function loadWeek() {
   const [w, t] = await Promise.all([api("/api/week?end=" + wkEnd), api("/api/trend?metric=weight&days=28")]);
   const s = w.summary, v = (x, dp = 0) => (x == null ? "–" : (+x).toFixed(dp));
   const k = (l, val, sub) => `<div><span class="lbl">${l}</span><div class="big">${val}</div><span class="src">${sub}</span></div>`;
+  const m = w.models || {}, tw = m.trend_weight, ex = m.expenditure, tg = m.weekly_target;
+  $("models").innerHTML =
+    k("Trend weight", tw ? v(tw.value, 1) : "–", tw ? "± " + v(tw.inputs && tw.inputs.sd_lb, 1) + " lb" : "no weigh-ins") +
+    k("Est. burn", ex && ex.value != null ? v(ex.value) : "–", ex ? (ex.inputs && ex.inputs.flag ? esc(ex.inputs.flag) : (ex.inputs ? ex.inputs.n_days + "-day window" : "")) : "not enough data") +
+    k("This week's target", tg ? v(tg.value) : "–", tg ? "set " + fmt(tg.date, { month: "short", day: "numeric" }) : "seed until Sunday");
   $("wkpis").innerHTML =
     k("Avg cal", v(s.calories.avg), s.calories.n + " days logged") +
     k("Avg protein", v(s.protein_g.avg) + "g", "target " + TARGET.pro + "g") +
@@ -440,7 +468,11 @@ async function loadWeek() {
 
 // ---------- body ----------
 async function loadBody() {
-  const b = await api("/api/body");
+  const [b, sc] = await Promise.all([api("/api/body"), api("/api/scorecard")]);
+  const row = (i) => `<div class="item"><span>${esc(i.item)}${i.date ? ' <span class="s">' + i.date + "</span>" : ""}${i.due ? '<br><span class="s">' + esc(i.due) + "</span>" : ""}</span><span class="sets">${i.value == null ? "–" : esc(String(i.value))}${i.unit && i.value != null ? " " + esc(i.unit) : ""}<br><span class="s" style="color:${/NOT TESTED|high|low|above|under 7|over 5|urgent/.test(i.status || "") ? "var(--warn)" : "inherit"}">${esc(i.status || "")}</span></span></div>`;
+  const grp = (t, xs) => `<div class="lbl" style="margin-top:8px">${t}</div>` + xs.map(row).join("");
+  $("scoreCard").innerHTML = `<div style="font-weight:700;color:var(--bad)">${esc(sc.banner)}</div>` + grp("Heart", sc.heart) + grp("Metabolic", sc.metabolic) + grp("Brain", sc.brain) + grp("Cancer", sc.cancer) + grp("Also", sc.also);
+  $("capCard").innerHTML = sc.capacity.tests.map((t) => `<div class="item"><span>${esc(t.test.replace(/_/g, " "))}</span><span class="sets">${t.last_date || "never"}${t.due ? ' <b style="color:var(--warn)">due</b>' : ""}</span></div>`).join("") + '<div class="src">Log a result by telling Claude (grip: best of 3 per hand).</div>';
   $("labsCard").innerHTML = b.key_labs.map((l) => `<div class="item"><span>${esc(l.test)}</span><span class="sets">${l.value ?? esc(l.value_text)}${l.flag ? " " + l.flag : ""} <span class="s">${l.date}</span></span></div>`).join("") + '<div class="src">ApoB and Lp(a) not tested yet. On the January list.</div>';
   $("scList").innerHTML = b.scans.map((x) => `${x.date}: ${x.weight ?? "–"} lb, lean ${x.lean_mass ?? "–"}, fat ${x.pbf ?? "–"}%`).join("<br>") || "No scans yet.";
   $("eyList").innerHTML = b.eye.map((x) => `${x.date}: ${x.injection ? "injection" : "no injection"}${x.drug ? " (" + esc(x.drug) + ")" : ""}${x.interval_weeks ? ", " + x.interval_weeks + " wk" : ""}${x.oct_thickness ? ", OCT " + x.oct_thickness : ""}`).join("<br>") || "No visits yet.";

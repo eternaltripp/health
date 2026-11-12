@@ -7,8 +7,11 @@ import { runRules, pushText } from "./rules.js";
 import { verifyAccess } from "./access.js";
 import { handleApi } from "./api.js";
 import APP_HTML from "./app.html";
+import { runModels } from "./models.js";
+import { weekendPush, dinnerPush } from "./pushes.js";
+import { capacityStatus } from "./data.js";
 
-const VERSION = "phase4.1-2026-11-12";
+const VERSION = "brief-2026-11-12";
 
 export default {
   async fetch(request, env, ctx) {
@@ -90,24 +93,35 @@ export default {
   },
 };
 
-// Push window: first try 6:30, retry every 15 min until last night's Oura sleep
-// is in, last try 9:00 (sends with a "no sleep data" note).
-const PUSH_FIRST = 6 * 60 + 30, PUSH_LAST = 9 * 60;
+// Push window (brief 1.6): first try 6:00 right after the sync, retry every 15 min
+// until last night's Oura sleep is in, last try 9:00 (sends with "sleep data not in yet").
+const PUSH_FIRST = 6 * 60, PUSH_LAST = 9 * 60;
+const FRIDAY_PUSH = 15 * 60, DINNER_PUSH = 15 * 60 + 30; // 3:00 pm Fri, 3:30 pm weekdays
 
 export async function tick(env, when) {
   const mins = chicagoHour(when) * 60 + chicagoMinute(when);
-  if (mins >= 6 * 60 && mins < 6 * 60 + 15) return morningSync(env);
-  if (mins >= PUSH_FIRST && mins <= PUSH_LAST + 5) return pushAttempt(env, when, mins >= PUSH_LAST);
+  const dow = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(when);
+  const date = chicagoDate(when);
+  if (mins >= PUSH_FIRST && mins < PUSH_FIRST + 15) {
+    const sync = await morningSync(env, date);
+    return { sync, push: await pushAttempt(env, when, false) };
+  }
+  if (mins >= PUSH_FIRST + 15 && mins <= PUSH_LAST + 5) return pushAttempt(env, when, mins >= PUSH_LAST);
+  if (dow === "Fri" && mins >= FRIDAY_PUSH && mins < FRIDAY_PUSH + 15) { await ensureSchema(env.DB); return weekendPush(env, date); }
+  if (!["Sat", "Sun"].includes(dow) && mins >= DINNER_PUSH && mins < DINNER_PUSH + 15) { await ensureSchema(env.DB); return dinnerPush(env, date); }
   return null;
 }
 
 // 6:00: pull Oura/CPAP/Withings, then run rules (rule 1 may adjust calories).
-export async function morningSync(env) {
+export async function morningSync(env, date = chicagoDate()) {
   await ensureSchema(env.DB);
   const r = await syncAll(env, { days: 7, trigger: "cron" });
   const bad = [r.oura && !r.oura.ok && "Oura", r.cpap && !r.cpap.ok && "CPAP", r.withings && !r.withings.ok && "Withings"].filter(Boolean);
   if (bad.length) await notify(env, `Health sync problem: ${bad.join(" and ")}. Run sync_now to see details.`);
-  await runRules(env.DB, chicagoDate(), { apply: true });
+  // 5.2 model hook: weight trend, expenditure, weekly target (Sunday), and any future model.
+  const models = await runModels(env.DB, date);
+  await runRules(env.DB, date, { apply: true });
+  return { models };
 }
 
 // One push attempt. Re-pulls Oura/CPAP, re-runs the rules, and sends only once
@@ -125,7 +139,11 @@ export async function pushAttempt(env, when = new Date(), final = false) {
   const r = await sendPush(env, pushText(plan), "Today");
   if (!r.ok) return { error: r.reason || r.status };
   const dow = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(when);
-  if (dow === "Sun") await sendPush(env, "Weekly review is ready. Ask Claude for your Sunday review or open the Week tab.", "Sunday review");
+  if (dow === "Sun") {
+    const cap = await capacityStatus(env.DB, date);
+    const due = cap.due.length ? ` Capacity tests due (90+ days or never): ${cap.due.join(", ")}.` : "";
+    await sendPush(env, "Weekly review is ready. Ask Claude for your Sunday review or open the Week tab." + due, "Sunday review");
+  }
   await env.DB.prepare("UPDATE plans SET pushed_at=datetime('now') WHERE date=?").bind(date).run();
   return { pushed: true, sleep_ready: plan.sleep_ready };
 }

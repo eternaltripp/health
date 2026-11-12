@@ -3,7 +3,7 @@ import { pullCpap } from "./myair.js";
 import { chicagoDate, addDays } from "./util.js";
 import { withingsConfigured, pullWithings, saveWithings } from "./withings.js";
 
-const OURA_COLS = ["sleep_score", "readiness", "hrv", "rhr", "steps", "total_sleep_min", "efficiency", "awake_min", "resp_rate", "temp_dev", "active_cal"];
+const OURA_COLS = ["sleep_score", "readiness", "hrv", "rhr", "steps", "total_sleep_min", "efficiency", "awake_min", "resp_rate", "temp_dev", "active_cal", "vo2_max", "cardio_age"];
 const CPAP_COLS = ["hours", "ahi", "leak", "mask_off", "myair_score"];
 
 // Upsert keyed on date. A re-run overwrites the row; a null from the API never
@@ -33,9 +33,9 @@ export async function syncAll(env, { days = 7, trigger = "sync_now", start: star
   const out = { window: { start, end }, oura: null, cpap: null };
 
   try {
-    const { rows, errors } = await pullOura(env, start, end);
+    const { rows, errors, soft_errors, vo2_records, cardio_age_records } = await pullOura(env, start, end);
     const n = await upsert(env.DB, "oura", OURA_COLS, rows);
-    out.oura = { ok: errors.length === 0, rows: n, dates: rows.map((r) => r.date), errors };
+    out.oura = { ok: errors.length === 0, rows: n, dates: rows.map((r) => r.date), errors, vo2_max: { records: vo2_records, cardio_age_records, errors: soft_errors } };
     await log(env.DB, trigger, "oura", errors.length === 0, n, errors.join("; "));
   } catch (e) {
     out.oura = { ok: false, rows: 0, error: String(e.message || e) };

@@ -86,6 +86,13 @@ export async function pullOura(env, start, end) {
     getAll(`${OURA_API}/sleep${q}`, h, errors, "sleep"),
     getAll(`${OURA_API}/daily_activity${q}`, h, errors, "daily_activity"),
   ]);
+  // 1.7 VO2 max and cardiovascular age. Soft errors: if the token lacks the scope or the
+  // ring hasn't produced a value, the rest of the sync still counts as OK.
+  const soft = [];
+  const [vo2, cva] = await Promise.all([
+    getAll(`${OURA_API}/vO2_max${q}`, h, soft, "vO2_max"),
+    getAll(`${OURA_API}/daily_cardiovascular_age${q}`, h, soft, "daily_cardiovascular_age"),
+  ]);
 
   const byDay = {};
   const put = (arr, fn) => arr.forEach((rec) => {
@@ -115,6 +122,8 @@ export async function pullOura(env, start, end) {
     o.steps = r.steps ?? null;
     o.active_cal = r.active_calories ?? null;
   });
+  put(vo2, (o, r) => { if (r.vo2_max != null) o.vo2_max = r.vo2_max; });
+  put(cva, (o, r) => { if (r.vascular_age != null) o.cardio_age = r.vascular_age; });
   const rows = Object.keys(byDay).sort().map((k) => { const o = byDay[k]; delete o._main; return o; });
-  return { rows, errors };
+  return { rows, errors, soft_errors: soft, vo2_records: vo2.length, cardio_age_records: cva.length };
 }

@@ -8,9 +8,13 @@ import { getReview, bodySummary, visitPacket } from "./review.js";
 import { logScan, logEye, logGlucose, getGlucose, listSettings, listLiftTargets } from "./data.js";
 import { withingsConfigured, withingsStatus, withingsAuthUrl, withingsCallback } from "./withings.js";
 import { html } from "./util.js";
+import { listSavedMeals, logSavedMeal, foodTotals } from "./data.js";
+import { getScorecard } from "./scorecard.js";
+import { weekendPush, dinnerPush } from "./pushes.js";
+import { handleMcp } from "./mcp.js";
 
-// Per-can numbers: 130 cal / 30 g are the old tracker's; 95 mg sodium is from the
-// "x4 (Genius Gourmet)" entry already in the log (380 mg for 4).
+// Per-can numbers: 130 cal / 30 g are the old tracker's; 95 mg sodium is the
+// Genius Gourmet label (RESEARCHED, Open Food Facts).
 const CAN = { cal: 130, p: 30, na: 95 };
 const MEALS = new Set(["breakfast", "lunch", "dinner", "snack", "shake", "other"]);
 const num = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) && n >= lo && n <= hi ? n : null; };
@@ -30,6 +34,8 @@ export async function handleApi(request, env, path) {
       const days = num(q("days") || 28, 2, 365) || 28;
       return json(await getTrends(db, q("metric") || "weight", days));
     }
+    if (path === "/api/saved_meals") return json({ saved_meals: await listSavedMeals(db) });
+    if (path === "/api/scorecard") return json(await getScorecard(db, date(q("date"))));
     if (path === "/api/exercises") return json({ exercises: await exerciseHistory(db) });
     if (path === "/api/plan") {
       // Always fresh (Oura can land after 6:00); runRules stores it without changing calories.
@@ -54,7 +60,7 @@ export async function handleApi(request, env, path) {
         name: String(i.name || "").trim().slice(0, 300),
         cal: num(i.cal, 0, 10000), protein_g: num(i.protein_g, 0, 1000),
         sodium_mg: i.sodium_mg === "" || i.sodium_mg == null ? null : num(i.sodium_mg, 0, 20000),
-        est: i.est !== false, source: "web",
+        est: i.est !== false, restaurant: !!i.restaurant, source: "web",
       }));
       if (!items.length || items.some((i) => !i.name || i.cal == null || i.protein_g == null)) return bad("each item needs name, cal, protein_g");
       const meal = MEALS.has(body.meal) ? body.meal : "other";
@@ -77,13 +83,22 @@ export async function handleApi(request, env, path) {
       for (const [k, lo, hi] of [["weight", 80, 500], ["water_oz", 0, 400], ["wine_glasses", 0, 30], ["sauna_min", 0, 300], ["steps", 0, 100000]]) {
         if (body[k] !== undefined) f[k] = body[k] === "" || body[k] === null ? null : num(body[k], lo, hi);
       }
+      if (body.waist_in !== undefined) f.waist_in = body.waist_in === "" || body.waist_in === null ? null : num(body.waist_in, 20, 70);
+      if (body.caffeine_mg !== undefined) f.caffeine_mg = body.caffeine_mg === "" || body.caffeine_mg === null ? null : num(body.caffeine_mg, 0, 3000);
+      for (const k of ["caffeine_last_time", "last_meal_time"]) {
+        if (body[k] !== undefined) {
+          if (body[k] === "" || body[k] === null) f[k] = null;
+          else if (/^([01]\d|2[0-3]):[0-5]\d$/.test(body[k])) f[k] = body[k];
+          else return bad(k + " must be HH:MM");
+        }
+      }
       if (body.note !== undefined) f.note = String(body.note).slice(0, 4000);
       await upsertDay(db, date(body.date), f);
       return json({ ok: true });
     }
     if (path === "/api/delete") {
-      const row = await deleteEntry(db, body.kind, Number(body.id));
-      return row ? json({ deleted: row.id }) : json({ error: "not found" }, 404);
+      const row = await deleteEntry(db, body.kind, body.id);
+      return row ? json({ deleted: row.id ?? row.date ?? row.name }) : json({ error: "not found" }, 404);
     }
     if (path === "/api/cans") {
       // Protein cans: +1 adds one can row; -1 removes one can (shrinks an "xN" row
@@ -122,10 +137,31 @@ export async function handleApi(request, env, path) {
       const ts = new Date().toISOString();
       return json({ saved: await logGlucose(db, [{ ts, mg_dl: mg }], "manual", (t) => chicagoDate(new Date(t))) });
     }
+    if (path === "/api/saved_meal/log") {
+      const d = date(body.date);
+      const r = await logSavedMeal(db, String(body.name || ""), d, MEALS.has(body.meal) ? body.meal : null, num(body.servings || 1, 0.1, 10) || 1);
+      return r ? json({ ...r, day_totals: await foodTotals(db, d) }) : json({ error: "no saved meal with that name" }, 404);
+    }
+    // Same tools as /mcp, behind Access instead of the bearer token (used for live checks from the browser).
+    if (path === "/api/tool") {
+      const rpc = body.name === "__list" ? { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }
+        : { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: String(body.name || ""), arguments: body.arguments || {} } };
+      const init = { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "web", version: "1" } } };
+      const mk = (m) => new Request(url.origin + "/mcp", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify(m) });
+      await handleMcp(mk(init), env);
+      const res = await handleMcp(mk(rpc), env);
+      const j = await res.json();
+      if (j.result && j.result.content) {
+        const t = j.result.content.map((c) => c.text).join("");
+        try { return json({ isError: !!j.result.isError, result: JSON.parse(t) }); } catch { return json({ isError: !!j.result.isError, result: t }); }
+      }
+      return json(j.result || j);
+    }
     if (path === "/api/push") {
       const d = chicagoDate();
-      const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
-      const plan = row ? JSON.parse(row.plan) : await runRules(db, d, { apply: false });
+      if (body.kind === "friday") return json(await weekendPush(env, d, { force: !!body.force }));
+      if (body.kind === "dinner") return json(await dinnerPush(env, d, { force: !!body.force, ignoreDinner: !!body.force }));
+      const plan = await runRules(db, d, { apply: false });
       const text = pushText(plan);
       const r = await sendPush(env, text, "Today (test)");
       return r.ok ? json({ sent: true, channel: r.channel, text }) : json({ error: "push failed", detail: { channel: r.channel, status: r.status, reason: r.reason } }, 502);

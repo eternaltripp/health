@@ -11,7 +11,7 @@
 
   // Every 15 min, 11:00-15:45 UTC. The handler works in Chicago time (CST or CDT):
   // 6:00 sync + rules; 6:30-9:00 push once last night's Oura sleep is in.
-  "triggers": { "crons": ["*/15 11-15 * * *"] },
+  "triggers": { "crons": ["*/15 11-15,20-21 * * *"] },
 
   "d1_databases": [
     {

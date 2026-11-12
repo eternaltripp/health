@@ -2,6 +2,7 @@
 // evaluate() is read-only. applyRule1() is the only thing that changes a setting,
 // and it runs from the morning cron (or run_rules with apply=true).
 import { addDays, chicagoDate } from "./util.js";
+import { modelSummary } from "./models.js";
 
 const all = async (db, sql, ...b) => (await db.prepare(sql).bind(...b).all()).results || [];
 const first = (db, sql, ...b) => db.prepare(sql).bind(...b).first();
@@ -57,8 +58,9 @@ async function rule1(db, date, st) {
   const rate = (a, b) => ((b.avg - a.avg) / b.avg) * 100; // % of body weight lost per week (positive = losing)
   const r0 = rate(w[0], w[1]), r1w = rate(w[1], w[2]);
   const input = { weekly_loss_pct: [r1(r0), r1(r1w)], avg_weight: w.map((x) => r1(x.avg)), band_pct: [T.lossRateLowPct, T.lossRateHighPct] };
-  if (r0 < T.lossRateLowPct && r1w < T.lossRateLowPct) return { ...base, status: "act", action: "cut", message: `Loss under ${T.lossRateLowPct}%/wk two weeks running: cut ${T.calStep} cal/day.`, input };
-  if (r0 > T.lossRateHighPct && r1w > T.lossRateHighPct) return { ...base, status: "act", action: "add", message: `Loss over ${T.lossRateHighPct}%/wk two weeks running: add ${T.calStep} cal/day back.`, input };
+  // Reporting only since 2026-11-12: the weekly model (models.js) sets the calorie target.
+  if (r0 < T.lossRateLowPct && r1w < T.lossRateLowPct) return { ...base, status: "watch", message: `Loss under ${T.lossRateLowPct}%/wk two weeks running. The weekly target model adjusts calories on Sunday.`, input };
+  if (r0 > T.lossRateHighPct && r1w > T.lossRateHighPct) return { ...base, status: "watch", message: `Loss over ${T.lossRateHighPct}%/wk two weeks running. The weekly target model adjusts calories on Sunday.`, input };
   return { ...base, status: "ok", message: "Loss rate in range or not two weeks running.", input };
 }
 
@@ -263,33 +265,35 @@ export async function evaluate(db, date = chicagoDate()) {
   const calls = [r9 && r9.training, r13 && r13.training];
   const training_call = calls.includes("zone2") ? "Zone 2 only, no heavy lifting" : calls.includes("lighter") ? "Lift lighter: no top sets or PRs" : "Train as planned";
   const lastW = await first(db, "SELECT weight FROM days WHERE weight IS NOT NULL AND date<=? ORDER BY date DESC LIMIT 1", date);
-  const calorie_target = Math.max(st.calorie_floor, st.calorie_base + st.calorie_adjust);
+  // Calorie target comes from the weekly model (brief 2.3). calorie_base is only the seed.
+  const models = await modelSummary(db, date);
+  const modelTarget = models.weekly_target && models.weekly_target.value;
+  const calorie_target = modelTarget != null ? modelTarget : Math.max(st.calorie_floor, st.calorie_base + st.calorie_adjust);
   const rank = { urgent: 0, act: 1, watch: 2 };
   const flagged = rules.filter((r) => rank[r.status] != null).sort((a, b) => rank[a.status] - rank[b.status]);
   return {
     date,
     training_call, sleep_ready: !!(r13 && r13.sleepReady),
-    calorie_target, calorie_base: st.calorie_base, calorie_adjust: st.calorie_adjust, calorie_floor: st.calorie_floor,
+    calorie_target, calorie_target_source: modelTarget != null ? `weekly model (set ${models.weekly_target.date})` : "calorie_base seed (no model target yet)",
+    trend_weight: models.trend_weight ? { value: models.trend_weight.value, sd_lb: models.trend_weight.inputs && models.trend_weight.inputs.sd_lb, date: models.trend_weight.date } : null,
+    estimated_burn: models.expenditure ? { value: models.expenditure.value, date: models.expenditure.date, flag: models.expenditure.inputs && models.expenditure.inputs.flag || null, window: models.expenditure.inputs && models.expenditure.inputs.window } : null,
+    weekly_target: models.weekly_target ? { value: models.weekly_target.value, set_on: models.weekly_target.date, inputs: models.weekly_target.inputs } : null,
+    short_sleep: !!(r13 && (r13.status === "act" || r13.status === "watch")),
+    calorie_base: st.calorie_base, calorie_floor: st.calorie_floor,
     step_baseline: st.step_baseline, step_bonus_per_1k_over_baseline: stepBonusPer1k(lastW && lastW.weight),
     protein_target: st.protein_target,
     sodium_cap: r4 && r4.lowSodium ? st.sodium_cap_low : st.sodium_cap_default,
     watch_items: flagged.map((r) => ({ rule: r.id, name: r.name, status: r.status, message: r.message })),
     rules,
-    not_live: ["Rule 3 deload size (no sourced number)", "Rule 6 '<6 h' and leak (no sourced threshold)", "Rule 7 '+40 spike' (no source)", "Rule 10 auto cap (you set it)", "Rule 11 HDL (tracked only)"],
+    not_live: ["Rule 1 auto-adjust (replaced by the weekly target model)", "Rule 3 deload size (no sourced number)", "Rule 6 '<6 h' and leak (no sourced threshold)", "Rule 7 '+40 spike' (no source)", "Rule 10 auto cap (you set it)", "Rule 11 HDL (tracked only)"],
     sources: "docs/phase2-rules-research.md in the repo",
   };
 }
 
 /** Runs the rules for a date, applies rule 1 if asked, stores the plan and a rules_log row per rule. Idempotent per date. */
 export async function runRules(db, date = chicagoDate(), { apply = false } = {}) {
-  let plan = await evaluate(db, date);
-  let change = null;
-  if (apply) {
-    const st = await getSettings(db);
-    change = await applyRule1(db, date, plan.rules.find((r) => r.id === 1), st);
-    if (change && change.to != null) plan = await evaluate(db, date);
-  }
-  plan.calorie_change = change;
+  // `apply` is kept for callers; rule 1 no longer changes settings (the weekly model does).
+  const plan = await evaluate(db, date);
   const stmts = [db.prepare("DELETE FROM rules_log WHERE date=?").bind(date)];
   for (const r of plan.rules) stmts.push(db.prepare("INSERT INTO rules_log (date, rule, input, output) VALUES (?,?,?,?)").bind(date, `${r.id} ${r.name || ""}`.trim(), JSON.stringify(r.input ?? null), JSON.stringify({ status: r.status, message: r.message })));
   stmts.push(db.prepare("INSERT INTO plans (date, plan) VALUES (?,?) ON CONFLICT(date) DO UPDATE SET plan=excluded.plan").bind(date, JSON.stringify(plan)));
@@ -301,6 +305,8 @@ export async function runRules(db, date = chicagoDate(), { apply = false } = {})
 export function pushText(plan) {
   const top = plan.watch_items[0];
   const watch = top ? `Watch: ${top.name}.` : "Nothing to watch.";
-  const sleepNote = plan.sleep_ready ? "" : " No sleep data yet, so this call ignores last night. Open the Oura app and ask for a fresh plan.";
-  return `${plan.training_call}.${sleepNote} Eat ${plan.calorie_target.toLocaleString("en-US")} cal, ${plan.protein_target} g protein, sodium under ${plan.sodium_cap.toLocaleString("en-US")} mg. ${watch}`;
+  const sleepNote = plan.sleep_ready ? "" : " Sleep data not in yet, so this call ignores last night. Open the Oura app and ask for a fresh plan.";
+  // 3.3 short-sleep add-on (rule 13 fired)
+  const shortSleep = plan.short_sleep ? " Short night: protein early, keep cans on hand, no caffeine after noon, lights out by 10." : "";
+  return `${plan.training_call}.${sleepNote} Eat ${plan.calorie_target.toLocaleString("en-US")} cal, ${plan.protein_target} g protein, sodium under ${plan.sodium_cap.toLocaleString("en-US")} mg. ${watch}${shortSleep}`;
 }

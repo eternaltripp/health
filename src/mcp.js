@@ -7,6 +7,10 @@ import { syncAll } from "./sync.js";
 import { evaluate, runRules } from "./rules.js";
 import { getReview, visitPacket } from "./review.js";
 import { logScan, logEye, logGlucose, getGlucose, setSetting, listSettings, setLiftTarget, listLiftTargets, SETTING_KEYS } from "./data.js";
+import { updateEntry, UPDATABLE, exportData, saveMeal, listSavedMeals, logSavedMeal, logCapacity, capacityStatus, CAPACITY_TESTS } from "./data.js";
+import { getScorecard } from "./scorecard.js";
+import { runModels, modelSummary } from "./models.js";
+import { weekendPush, dinnerPush, weekendPlanText } from "./pushes.js";
 
 const DateArg = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
   .describe("YYYY-MM-DD (America/Chicago). Omit for today.");
@@ -40,6 +44,7 @@ function buildServer(env) {
         protein_g: z.number().nonnegative(),
         sodium_mg: z.number().nonnegative().optional(),
         est: z.boolean().default(true).describe("true = estimate, false = from label/exact"),
+        restaurant: z.boolean().default(false).describe("true if it came from a restaurant, takeout or catered event"),
       })).min(1),
     },
   }, async ({ date, meal, items }) => {
@@ -99,7 +104,7 @@ function buildServer(env) {
   server.registerTool("log_day", {
     title: "Log daily details",
     description:
-      "Set daily fields: water (oz), wine (glasses), sauna (minutes), steps (manual override), protein cans, or a note. Only the fields you pass change. " +
+      "Set daily fields: water (oz), wine (glasses), sauna (minutes), steps (manual override), protein cans, caffeine (mg and time of the last caffeine), time of the last meal, waist (inches), or a note. Only the fields you pass change. " +
       "Notes append to the day's existing note unless replace_note=true.",
     inputSchema: {
       date: DateArg,
@@ -108,6 +113,10 @@ function buildServer(env) {
       sauna_min: z.number().nonnegative().optional(),
       steps: z.number().int().nonnegative().optional(),
       cans: z.number().int().nonnegative().optional(),
+      caffeine_mg: z.number().nonnegative().optional().describe("Total caffeine for the day, mg"),
+      caffeine_last_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().describe("HH:MM, 24-hour, Chicago time of the last caffeine"),
+      last_meal_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional().describe("HH:MM, 24-hour, Chicago time he finished eating"),
+      waist_in: z.number().min(20).max(70).optional().describe("Waist at the navel, inches"),
       note: z.string().optional(),
       replace_note: z.boolean().default(false),
     },
@@ -174,13 +183,96 @@ function buildServer(env) {
 
   server.registerTool("delete_entry", {
     title: "Delete a logged entry",
-    description: "Delete one mistaken food, lift or BP entry by id (ids come from get_day / get_lifts). Only use when he asks to remove or correct an entry.",
-    inputSchema: { kind: z.enum(["food", "lift", "bp"]), id: z.number().int() },
+    description: "Delete one mistaken food, lift, BP or capacity entry by id (ids come from get_day / get_lifts / get_scorecard), an eye visit by date (id = YYYY-MM-DD), or a saved meal by name (id = the name). Only use when he asks to remove an entry.",
+    inputSchema: { kind: z.enum(["food", "lift", "bp", "eye", "capacity", "saved_meal"]), id: z.union([z.number().int(), z.string()]) },
   }, async ({ kind, id }) => {
     const row = await deleteEntry(db, kind, id);
     return row ? ok({ deleted: row }) : fail(`no ${kind} with id ${id}`);
   });
 
+
+  server.registerTool("update_entry", {
+    title: "Fix a logged entry",
+    description: "Change fields on one row without deleting it. kind food/lift/bp/capacity use the numeric id; eye and day use the date (YYYY-MM-DD) as id. " +
+      "append=true adds text to the end of existing text fields (e.g. add to a note) instead of replacing. Allowed fields: " +
+      Object.entries(UPDATABLE).map(([k, v]) => `${k}: ${Object.keys(v.cols).join("/")}`).join(". ") + ".",
+    inputSchema: {
+      kind: z.enum(Object.keys(UPDATABLE)),
+      id: z.union([z.number().int(), z.string()]),
+      fields: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])),
+      append: z.boolean().default(false),
+    },
+  }, async ({ kind, id, fields, append }) => {
+    try {
+      const r = await updateEntry(db, kind, id, fields, append);
+      return r ? ok(r) : fail(`no ${kind} with id ${id}`);
+    } catch (e) { return fail(String(e.message || e)); }
+  });
+
+  server.registerTool("export_data", {
+    title: "Export daily features",
+    description: "One row per calendar day from the daily_features view (weight, calories, protein, sodium, restaurant meals, wine, caffeine, last meal time, steps, sleep, HRV, resting HR, readiness, CPAP for the night ending that morning, AM/PM BP, lift sets, sauna, water, VO2 max, waist, day of week, food/weight logged). For analysis. Max 730 days.",
+    inputSchema: { start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), end_date: DateArg, format: z.enum(["json", "csv"]).default("json") },
+  }, async ({ start_date, end_date, format }) => {
+    const end = day(end_date);
+    if (start_date > end) return fail("start_date is after end_date");
+    const n = Math.round((Date.parse(end) - Date.parse(start_date)) / 86400000) + 1;
+    if (n > 730) return fail(`range is ${n} days, max 730`);
+    return ok(await exportData(db, start_date, end, format));
+  });
+
+  // ---------------- saved meals ----------------
+  const ItemSchema = z.object({
+    name: z.string().min(1), cal: z.number().nonnegative(), protein_g: z.number().nonnegative(),
+    sodium_mg: z.number().nonnegative().optional(), est: z.boolean().default(true), restaurant: z.boolean().default(false),
+  });
+  server.registerTool("save_meal", {
+    title: "Save a named meal",
+    description: "Save a meal he eats often (one or more items with cal, protein, sodium, restaurant flag) under a short name so it can be logged in one step later. Saving the same name replaces it.",
+    inputSchema: { name: z.string().min(1).max(60), meal: z.enum(MEALS).optional(), items: z.array(ItemSchema).min(1) },
+  }, async ({ name, meal, items }) => ok({ saved_meals: await saveMeal(db, name, meal, items) }));
+
+  server.registerTool("log_saved_meal", {
+    title: "Log a saved meal",
+    description: "Log a saved meal by name (case-insensitive). servings scales every item. Returns the day's totals.",
+    inputSchema: { name: z.string().min(1), date: DateArg, meal: z.enum(MEALS).optional(), servings: z.number().positive().default(1) },
+  }, async ({ name, date, meal, servings }) => {
+    const d = day(date);
+    const r = await logSavedMeal(db, name, d, meal, servings);
+    if (!r) return fail(`no saved meal named "${name}". Saved: ${(await listSavedMeals(db)).map((m) => m.name).join(", ") || "none"}`);
+    return ok({ ...r, date: d, day_totals: await foodTotals(db, d) });
+  });
+
+  server.registerTool("list_saved_meals", {
+    title: "List saved meals",
+    description: "All saved meals with their items and totals.",
+    inputSchema: {},
+  }, async () => ok({ saved_meals: await listSavedMeals(db) }));
+
+  // ---------------- 4.x scorecard and capacity ----------------
+  server.registerTool("get_scorecard", {
+    title: "Four Horsemen scorecard",
+    description: "Heart (ApoB, Lp(a), LDL, non-HDL, HDL, 14-day home BP, CAC), metabolic (fasting glucose, insulin, A1C, triglycerides, waist, trend weight), brain (14-day sleep, BP, HRV trend), cancer (colonoscopy, PSA), hematocrit, and capacity tests with what's due. Use for 'how am I doing overall' and doctor prep.",
+    inputSchema: { date: DateArg },
+  }, async ({ date }) => ok(await getScorecard(db, day(date))));
+
+  server.registerTool("log_capacity", {
+    title: "Log a capacity test",
+    description: "Record a capacity test result. Tests: " + Object.entries(CAPACITY_TESTS).map(([k, u]) => `${k} (${u})`).join(", ") +
+      ". Grip: best of 3 per hand, log left and right separately. inbody = lean mass from an InBody (log_scan also counts). vo2max_lab = a lab test, not Oura's estimate.",
+    inputSchema: { test: z.enum(Object.keys(CAPACITY_TESTS)), value: z.number(), date: DateArg, unit: z.string().optional(), note: z.string().optional() },
+  }, async ({ test, value, date, unit, note }) => ok({ saved: await logCapacity(db, { test, value, date: day(date), unit, note }), status: await capacityStatus(db, day(date)) }));
+
+  server.registerTool("get_models", {
+    title: "Weight trend, burn and weekly target",
+    description: "Model outputs: Kalman trend weight (with uncertainty), estimated daily burn (21-day window, intake minus trend change x 3,500), and the weekly calorie target (burn - 500, floor 1,700, max change 150/week, set Sundays). rerun=true recomputes now (the weekly target only changes on Sunday unless force_target=true).",
+    inputSchema: { date: DateArg, rerun: z.boolean().default(false), force_target: z.boolean().default(false), series_days: z.number().int().min(0).max(365).default(0) },
+  }, async ({ date, rerun, force_target, series_days }) => {
+    const d = day(date);
+    const ran = rerun ? await runModels(db, d, { force: force_target }) : undefined;
+    const series = series_days ? (await db.prepare("SELECT date, value, inputs FROM model_outputs WHERE model='weight_trend' AND date BETWEEN ? AND ? ORDER BY date").bind(addDays(d, -(series_days - 1)), d).all()).results.map((r) => ({ date: r.date, trend: r.value, weight: JSON.parse(r.inputs).weight, sd_lb: JSON.parse(r.inputs).sd_lb })) : undefined;
+    return ok({ ran, ...(await modelSummary(db, d)), trend_series: series });
+  });
 
   // ---------------- phase 2: plan, rules, review ----------------
   server.registerTool("get_plan", {
@@ -208,13 +300,14 @@ function buildServer(env) {
 
   server.registerTool("send_push_now", {
     title: "Send today's plan push now",
-    description: "Send the morning plan push notification (Pushover) (training call, calorie target, sodium cap, top watch item) to his phone right now. Use only when he asks to test or resend the push.",
-    inputSchema: {},
-  }, async () => {
+    description: "Send a push to his phone now. kind=morning (default): today's plan. kind=friday: the weekend plan. kind=dinner: the dinner-out prompt. Friday/dinner obey their settings and send once per day unless force=true. Use only when he asks to test or resend.",
+    inputSchema: { kind: z.enum(["morning", "friday", "dinner"]).default("morning"), force: z.boolean().default(false) },
+  }, async ({ kind, force }) => {
+    if (kind === "friday") return ok(await weekendPush(env, chicagoDate(), { force }));
+    if (kind === "dinner") return ok(await dinnerPush(env, chicagoDate(), { force, ignoreDinner: force }));
     const { runRules: rr, pushText: pt } = await import("./rules.js");
     const d = chicagoDate();
-    const row = await db.prepare("SELECT plan FROM plans WHERE date=?").bind(d).first();
-    const plan = row ? JSON.parse(row.plan) : await rr(db, d, { apply: false });
+    const plan = await rr(db, d, { apply: false });
     const { sendPush } = await import("./util.js");
     const r = await sendPush(env, pt(plan), "Today");
     return r.ok ? ok({ sent: true, channel: r.channel, text: pt(plan) }) : fail(`Push failed (${r.channel}): ${r.reason || r.status}`);

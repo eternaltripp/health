@@ -1,6 +1,7 @@
 // Sunday review, visit packet, body summary.
 import { addDays, chicagoDate } from "./util.js";
 import { getSettings, alcoholReport, evaluate } from "./rules.js";
+import { capacityStatus } from "./data.js";
 
 const all = async (db, sql, ...b) => (await db.prepare(sql).bind(...b).all()).results || [];
 const first = (db, sql, ...b) => db.prepare(sql).bind(...b).first();
@@ -29,10 +30,12 @@ export async function getReview(db, end = chicagoDate()) {
     lifts,
     bp: { avg_7d: bpNow.n ? `${Math.round(bpNow.s)}/${Math.round(bpNow.d)}` : null, readings: bpNow.n, prior: bpPrev.n ? `${Math.round(bpPrev.s)}/${Math.round(bpPrev.d)}` : null },
     protein: { target: st.protein_target, days_hit: protDays.filter((d) => d.p >= st.protein_target).length, days_logged: protDays.length },
-    calories: { week_total: Math.round(calWeek.c || 0), weekly_budget: (st.calorie_base + st.calorie_adjust) * 7 },
+    calories: { week_total: Math.round(calWeek.c || 0), weekly_budget: plan.calorie_target * 7 },
     next_week: { calorie_target: plan.calorie_target, sodium_cap: plan.sodium_cap, protein_target: plan.protein_target, training_call_today: plan.training_call },
     watch_items: plan.watch_items,
     alcohol,
+    models: { trend_weight: plan.trend_weight, estimated_burn: plan.estimated_burn, weekly_target: plan.weekly_target },
+    capacity_due: (await capacityStatus(db, end)).due,
     scoreboard: await scoreboard(db, end),
   };
 }

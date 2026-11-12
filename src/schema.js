@@ -4,9 +4,12 @@
 // apply` stays in sync and will skip them.
 import m0001 from "../migrations/0001_init.sql";
 import m0002 from "../migrations/0002_phase2.sql";
+import m0003 from "../migrations/0003_brief_2026_11_12.sql";
+import m0004 from "../migrations/0004_sodium_backfill.sql";
+import m0005 from "../migrations/0005_daily_features.sql";
 
 // Statements are split on ";" so no string literal in a migration may contain one.
-const MIGRATIONS = [["0001_init.sql", m0001], ["0002_phase2.sql", m0002]];
+const MIGRATIONS = [["0001_init.sql", m0001], ["0002_phase2.sql", m0002], ["0003_brief_2026_11_12.sql", m0003], ["0004_sodium_backfill.sql", m0004], ["0005_daily_features.sql", m0005]];
 
 let ready = null; // per-isolate memo
 
