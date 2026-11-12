@@ -104,7 +104,7 @@ async function modelTarget(db, date, { force = false } = {}) {
   const prev = await first(db, "SELECT date, value FROM model_outputs WHERE model='calorie_target' AND date<? ORDER BY date DESC LIMIT 1", date);
   // Set once a week on Sunday's run. Before any target exists, set one on the first run.
   if (!force && today) return { model: "calorie_target", kept: today };
-  if (!force && prev && !isSunday(date)) return { model: "calorie_target", kept: prev };
+  if (!force && !isSunday(date)) return prev ? { model: "calorie_target", kept: prev } : { model: "calorie_target", waiting: "first target is set on Sunday's run, seed used until then" };
   const exp = await first(db, "SELECT value, inputs FROM model_outputs WHERE model='expenditure' AND date<=? AND value IS NOT NULL ORDER BY date DESC LIMIT 1", date);
   const seed = await first(db, "SELECT value FROM settings WHERE key='calorie_base'");
   const from = prev ? prev.value : Number(seed ? seed.value : 1900);
