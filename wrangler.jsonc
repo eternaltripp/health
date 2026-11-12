@@ -5,6 +5,8 @@
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  // Don't wipe variables set in the dashboard on deploy.
+  "keep_vars": true,
   "observability": { "enabled": true },
 
   // 6:00 a.m. Central. Cron runs in UTC, and Central shifts between UTC-6 (CST)
