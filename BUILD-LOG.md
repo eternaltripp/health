@@ -99,3 +99,11 @@
 ### Next
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.
 - Phase 2: researched rules, morning push, Sunday review.
+
+## 2026-11-12 — build brief (all phases)
+- Migrations 0003–0007: new day/food/oura columns, model_outputs, saved_meals, capacity, push_log, push toggles, meds fixes, sodium backfill (cans 95 mg RESEARCHED, items FROM MEMORY est=1), restaurant flags, daily_features view (spine split in two because D1 caps compound SELECT terms).
+- New tools: update_entry, export_data, save_meal, log_saved_meal, list_saved_meals, get_scorecard, log_capacity, get_models. delete_entry adds eye/capacity/saved_meal. log_food restaurant, log_day caffeine/last meal/waist. send_push_now kind=morning|friday|dinner.
+- /api/tool: same MCP tools behind Access, for browser checks.
+- Cron now `*/15 11-15,20-21 * * *`: 6:00 sync + models + first push try; retries to 9:00; Fri 15:00 weekend plan; weekdays 15:30 dinner prompt.
+- Rule 1 is report-only; calorie target comes from the weekly model (Sunday). Seed 1,900 until the first Sunday.
+- Oura VO2 max / cardio age: 401 with current token. Scopes widened; needs a re-auth.

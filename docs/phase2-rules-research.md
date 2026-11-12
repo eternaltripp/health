@@ -149,3 +149,19 @@ These rules produce flags and suggestions. They don't diagnose. Anything medical
 ## Morning push and Sunday review
 - **6:30 CT daily:** training call, calorie target, sodium cap, top watch item. No health numbers other than the targets (spec rule).
 - **Sunday 6:30:** a one-line push saying the review is ready. The full review comes from `get_review`.
+
+## Models and numbers added 2026-11-12 (build brief)
+
+| Number | Value | Label |
+|---|---|---|
+| Can sodium | 95 mg/can | RESEARCHED: Genius Gourmet label, Open Food Facts |
+| Imported-history sodium per item | see migrations/0004 | FROM MEMORY estimates, est=1 |
+| Weight trend smoothing | Kalman, steady gain 0.1 (q 0.025, r 2.25 lb²) | gain = brief's EWMA alpha 0.1 (SPEC); r = 1.5 lb daily scale noise (FROM MEMORY) |
+| Burn window | 21 days, min 14, needs 80% days with food + weight | SPEC (brief 2.2) |
+| kcal per lb | 3,500 | SPEC |
+| Weekly target | burn − 500, floor 1,700, ±150/week, Sundays | SPEC (brief 2.3) |
+| Scorecard BP | < 130/80 | RESEARCHED, same as rule 4 |
+| Scorecard sleep | ≥ 7 h | RESEARCHED: AASM/SRS 2015 |
+| Scorecard labs | lab's own H/L flag | lab reference range |
+| Capacity reminder | 90+ days | SPEC (brief 4.2) |
+| Oura scope for VO2 max | heart_health | FROM MEMORY, confirm at re-auth |
