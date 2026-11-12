@@ -86,6 +86,16 @@
 
 - 11/11 23:00: with NTFY_TOKEN set, ntfy.sh returned 522 (timeout) from the Worker. Switched pushes to Pushover (PUSHOVER_TOKEN + PUSHOVER_USER secrets; POST api.pushover.net/1/messages.json, success = status 1). ntfy kept only as fallback when Pushover isn't configured.
 
+## 2026-11-12: Sleep rule and push timing
+- Oura posted 11/12 sleep at 6:48, after the 6:30 push. The push now waits for it.
+  - One cron, `*/15 11-15 * * *`. `tick()` works in Chicago time: 6:00 sync + rules; 6:30-9:00 every 15 min re-sync + re-run rules + push once sleep is in; final try at 9:00 sends with a "no sleep data" note. pushed_at stops repeats.
+- Rule 13 (last night's sleep, RESEARCHED: Craven 2022, AASM/SRS 2015, Knowles 2018):
+  - 6 h or less → "lift lighter".
+  - 6 h or less two nights running → Zone 2.
+  - The training call takes the most cautious of rules 9 and 13.
+- Tested locally (dry-run push): waits at 6:30/6:45, pushes at 7:00 when sleep lands, skips at 7:15, final 9:00 push carries the note, 5:45 is a no-op, summer 6:30 CDT works. Rule 13 ok / lighter / zone2 paths all fire.
+- `PUSH_DRY_RUN` exists only in local .dev.vars.
+
 ### Next
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.
 - Phase 2: researched rules, morning push, Sunday review.

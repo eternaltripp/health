@@ -89,6 +89,7 @@ export async function pushoverDetail(env, msg, title) {
   } catch (e) { return { ok: false, channel: "pushover", reason: String(e.message || e) }; }
 }
 export async function sendPush(env, msg, title = "Health") {
+  if (env.PUSH_DRY_RUN === "1") { console.log("DRY PUSH:", title, msg); return { ok: true, channel: "dry-run" }; } // local .dev.vars only
   if (env.PUSHOVER_TOKEN && env.PUSHOVER_USER) return pushoverDetail(env, msg, title);
   return { channel: "ntfy", ...(await notifyDetail(env, msg, title)) };
 }

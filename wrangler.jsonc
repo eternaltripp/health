@@ -9,10 +9,9 @@
   "keep_vars": true,
   "observability": { "enabled": true },
 
-  // 6:00 sync and 6:30 push, Central. Cron runs in UTC and Central shifts between
-  // UTC-6 (CST) and UTC-5 (CDT), so both hours fire and the handler only acts
-  // when the Chicago wall clock reads 6:00 or 6:30.
-  "triggers": { "crons": ["0 11 * * *", "30 11 * * *", "0 12 * * *", "30 12 * * *"] },
+  // Every 15 min, 11:00-15:45 UTC. The handler works in Chicago time (CST or CDT):
+  // 6:00 sync + rules; 6:30-9:00 push once last night's Oura sleep is in.
+  "triggers": { "crons": ["*/15 11-15 * * *"] },
 
   "d1_databases": [
     {

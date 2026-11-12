@@ -113,6 +113,24 @@ These rules produce flags and suggestions. They don't diagnose. Anything medical
 
 ---
 
+## 13. Last night's sleep → training call (LIVE, added 2026-11-12)
+- **Threshold:** RESEARCHED: 6 hours or less of sleep is the cutoff for "acute sleep loss".
+  - Craven et al., *Sports Med* 2022;52:2669, meta-analysis of 69 studies. Sleep loss was defined as ≤6 h in 24 h, and control sleep as >6 h. Performance dropped about 7.5% on average, with significant effects in every category, strength included.
+  - The same paper found tasks done in the evening were consistently hurt, while morning tasks were largely unaffected.
+  - The AASM/SRS consensus (Watson et al., *Sleep* / *JCSM* 2015) says 6 hours or less per night is inadequate for health and safety. Adults should sleep 7+ hours regularly.
+- **Two nights in a row:** RESEARCHED: a review of 17 studies found consecutive nights of short sleep reduced force on multi-joint lifts, but not single-joint ones. One night of total deprivation had little effect on strength. Source: Knowles et al., *J Sci Med Sport* 2018;21:959.
+- **Live rule:** uses Oura's total sleep time, not time in bed.
+  - Last night 6 h or less → "Lift lighter: no top sets or PRs", and lift in the morning if possible.
+  - 6 h or less two nights in a row → "Zone 2 only, no heavy lifting".
+  - The training call takes the most cautious answer from this rule and rule 9 (HRV).
+- **"Under 5 hours":** NOT used as a separate step. I found no source that sets a different cutoff at 5 h; the research cutoff is 6 h.
+
+## Push timing (changed 2026-11-12)
+- The push no longer goes out at a fixed 6:30.
+- From 6:30 to 9:00 CT, every 15 minutes, the worker re-pulls Oura and CPAP and re-runs the rules. It sends once last night's sleep is in.
+- If sleep still isn't in at 9:00, it sends anyway, saying the call ignores last night.
+- It never sends twice in a day.
+
 ## Calorie target and step bonus
 - **Base:** 1,900/day. SPEC: weekly 13,300 ÷ 7. Floor 1,700. SPEC.
 - **Adjustments:** rule 1 moves it in 150 steps.

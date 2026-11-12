@@ -19,6 +19,7 @@ export const T = {
   glucoseHigh: 140, glucoseTarPct: 10,                                                                     // rule 7
   hrvSwcSd: 0.5, hrvBaselineDays: 60, rhrBump: 5, rhrDays: 3,                                              // rule 9
   walkKcalPerKgKm: 0.5, stepsPerKm: 1300, stepBonusShare: 0.5,                                             // step bonus
+  shortSleepMin: 360,                                                                                      // rule 13: <= 6 h (Craven 2022, AASM/SRS 2015)
 };
 
 export async function getSettings(db) {
@@ -205,6 +206,20 @@ async function rule9(db, date) {
   return { ...base, status: "ok", training: "normal", message: "HRV in your normal band.", input };
 }
 
+// Rule 13: last night's sleep. Oura dates a night by the morning you wake, so the row for `date` is last night.
+async function rule13(db, date) {
+  const base = { id: 13, name: "Last night's sleep" };
+  const rows = await all(db, "SELECT date, total_sleep_min FROM oura WHERE date IN (?, ?)", date, addDays(date, -1));
+  const last = rows.find((r) => r.date === date), prev = rows.find((r) => r.date === addDays(date, -1));
+  if (!last || last.total_sleep_min == null) return { ...base, status: "no_data", training: "normal", sleepReady: false, message: "Last night's Oura sleep isn't in yet.", input: null };
+  const h = (m) => Math.round((m / 60) * 10) / 10;
+  const short = (r) => r && r.total_sleep_min != null && r.total_sleep_min <= T.shortSleepMin;
+  const input = { last_night_h: h(last.total_sleep_min), night_before_h: prev && prev.total_sleep_min != null ? h(prev.total_sleep_min) : null, threshold_h: T.shortSleepMin / 60 };
+  if (short(last) && short(prev)) return { ...base, status: "act", training: "zone2", sleepReady: true, message: "6 h or less two nights running: Zone 2 today, no heavy lifting (repeated short nights cut strength on compound lifts).", input };
+  if (short(last)) return { ...base, status: "watch", training: "lighter", sleepReady: true, message: "6 h or less last night: lift, but skip top sets and PR attempts, and lift in the morning if you can.", input };
+  return { ...base, status: "ok", training: "normal", sleepReady: true, message: `Slept ${input.last_night_h} h.`, input };
+}
+
 const DRINK = /\b(wine|cabernet|merlot|pinot|xinomavro|port|beer|guinness|ipa|lager|whiskey|whisky|bourbon|scotch|vodka|gin|tequila|margarita|cocktail|smash|old fashioned|martini|sangria|champagne|prosecco)\b/i;
 export async function alcoholReport(db, date, days = 60) {
   const start = addDays(date, -(days - 1));
@@ -240,17 +255,20 @@ export function stepBonusPer1k(weightLb) {
 export async function evaluate(db, date = chicagoDate()) {
   const st = await getSettings(db);
   const rules = [];
-  for (const f of [() => rule1(db, date, st), () => rule2(db), () => rule3(db, date), () => rule4(db, date), () => rule5(db), () => rule6(db, date), () => rule7(db, date), () => rule8(db, st), () => rule9(db, date)]) {
+  for (const f of [() => rule1(db, date, st), () => rule2(db), () => rule3(db, date), () => rule4(db, date), () => rule5(db), () => rule6(db, date), () => rule7(db, date), () => rule8(db, st), () => rule9(db, date), () => rule13(db, date)]) {
     try { rules.push(await f()); } catch (e) { rules.push({ id: rules.length + 1, status: "error", message: String(e.message || e) }); }
   }
-  const r4 = rules.find((r) => r.id === 4), r9 = rules.find((r) => r.id === 9);
+  const r4 = rules.find((r) => r.id === 4), r9 = rules.find((r) => r.id === 9), r13 = rules.find((r) => r.id === 13);
+  // Training call: the most cautious of the HRV rule and the sleep rule.
+  const calls = [r9 && r9.training, r13 && r13.training];
+  const training_call = calls.includes("zone2") ? "Zone 2 only, no heavy lifting" : calls.includes("lighter") ? "Lift lighter: no top sets or PRs" : "Train as planned";
   const lastW = await first(db, "SELECT weight FROM days WHERE weight IS NOT NULL AND date<=? ORDER BY date DESC LIMIT 1", date);
   const calorie_target = Math.max(st.calorie_floor, st.calorie_base + st.calorie_adjust);
   const rank = { urgent: 0, act: 1, watch: 2 };
   const flagged = rules.filter((r) => rank[r.status] != null).sort((a, b) => rank[a.status] - rank[b.status]);
   return {
     date,
-    training_call: r9 && r9.training === "zone2" ? "Zone 2 only, no heavy lifting" : "Train as planned",
+    training_call, sleep_ready: !!(r13 && r13.sleepReady),
     calorie_target, calorie_base: st.calorie_base, calorie_adjust: st.calorie_adjust, calorie_floor: st.calorie_floor,
     step_baseline: st.step_baseline, step_bonus_per_1k_over_baseline: stepBonusPer1k(lastW && lastW.weight),
     protein_target: st.protein_target,
@@ -283,5 +301,6 @@ export async function runRules(db, date = chicagoDate(), { apply = false } = {})
 export function pushText(plan) {
   const top = plan.watch_items[0];
   const watch = top ? `Watch: ${top.name}.` : "Nothing to watch.";
-  return `${plan.training_call}. Eat ${plan.calorie_target.toLocaleString("en-US")} cal, ${plan.protein_target} g protein, sodium under ${plan.sodium_cap.toLocaleString("en-US")} mg. ${watch}`;
+  const sleepNote = plan.sleep_ready ? "" : " No sleep data yet, so this call ignores last night. Open the Oura app and ask for a fresh plan.";
+  return `${plan.training_call}.${sleepNote} Eat ${plan.calorie_target.toLocaleString("en-US")} cal, ${plan.protein_target} g protein, sodium under ${plan.sodium_cap.toLocaleString("en-US")} mg. ${watch}`;
 }

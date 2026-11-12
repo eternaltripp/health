@@ -2,13 +2,13 @@ import { ensureSchema } from "./schema.js";
 import { handleMcp } from "./mcp.js";
 import { syncAll } from "./sync.js";
 import { authUrl, exchangeCode } from "./oura.js";
-import { chicagoHour, chicagoMinute, chicagoDate, json, html, safeEqual, notify } from "./util.js";
+import { chicagoHour, chicagoMinute, chicagoDate, json, html, safeEqual, notify, sendPush } from "./util.js";
 import { runRules, pushText } from "./rules.js";
 import { verifyAccess } from "./access.js";
 import { handleApi } from "./api.js";
 import APP_HTML from "./app.html";
 
-const VERSION = "phase4-2026-11-11";
+const VERSION = "phase4.1-2026-11-12";
 
 export default {
   async fetch(request, env, ctx) {
@@ -34,8 +34,7 @@ export default {
       // Local-only test hook for the 6:00/6:30 jobs (wrangler dev ignores cron times).
       if (path === "/__dev/morning" && env.DEV_NO_ACCESS === "1" && url.hostname === "localhost") {
         const when = new Date(url.searchParams.get("time") || Date.now());
-        if (url.searchParams.get("step") === "push") { await morningPush(env, when); return json({ pushed: true }); }
-        await morningSync(env); return json({ synced: true });
+        return json({ result: await tick(env, when) });
       }
 
       // Web page + its API. Locked to Cloudflare Access; the worker verifies the
@@ -84,15 +83,23 @@ export default {
     }
   },
 
-  // UTC crons at :00 and :30 of 11 and 12 cover CST and CDT. Only the run that
-  // lands on 6:00 / 6:30 Chicago does anything.
+  // One cron, every 15 min from 11:00 to 15:45 UTC. tick() works in Chicago time,
+  // so it's right in both CST and CDT.
   async scheduled(event, env, ctx) {
-    const when = new Date(event.scheduledTime);
-    const hour = chicagoHour(when), minute = chicagoMinute(when);
-    if (hour !== 6) return;
-    ctx.waitUntil(minute < 15 ? morningSync(env) : morningPush(env, when));
+    ctx.waitUntil(tick(env, new Date(event.scheduledTime)));
   },
 };
+
+// Push window: first try 6:30, retry every 15 min until last night's Oura sleep
+// is in, last try 9:00 (sends with a "no sleep data" note).
+const PUSH_FIRST = 6 * 60 + 30, PUSH_LAST = 9 * 60;
+
+export async function tick(env, when) {
+  const mins = chicagoHour(when) * 60 + chicagoMinute(when);
+  if (mins >= 6 * 60 && mins < 6 * 60 + 15) return morningSync(env);
+  if (mins >= PUSH_FIRST && mins <= PUSH_LAST + 5) return pushAttempt(env, when, mins >= PUSH_LAST);
+  return null;
+}
 
 // 6:00: pull Oura/CPAP/Withings, then run rules (rule 1 may adjust calories).
 export async function morningSync(env) {
@@ -103,16 +110,22 @@ export async function morningSync(env) {
   await runRules(env.DB, chicagoDate(), { apply: true });
 }
 
-// 6:30: push the plan. Sundays also say the review is ready.
-export async function morningPush(env, when = new Date()) {
+// One push attempt. Re-pulls Oura/CPAP, re-runs the rules, and sends only once
+// last night's sleep is in (or on the final attempt). Never sends twice a day.
+export async function pushAttempt(env, when = new Date(), final = false) {
   await ensureSchema(env.DB);
   const date = chicagoDate(when);
   const st = await env.DB.prepare("SELECT value FROM settings WHERE key='push_enabled'").first();
-  if (st && st.value === "0") return;
-  let row = await env.DB.prepare("SELECT plan FROM plans WHERE date=?").bind(date).first();
-  const plan = row ? JSON.parse(row.plan) : await runRules(env.DB, date, { apply: true });
-  await notify(env, pushText(plan), "Today");
+  if (st && st.value === "0") return { skipped: "push disabled" };
+  const done = await env.DB.prepare("SELECT pushed_at FROM plans WHERE date=?").bind(date).first();
+  if (done && done.pushed_at) return { skipped: "already pushed" };
+  await syncAll(env, { days: 2, trigger: "push-retry" });
+  const plan = await runRules(env.DB, date, { apply: true }); // rule 1 is guarded to one change per 14 days
+  if (!plan.sleep_ready && !final) return { waiting: "sleep not in yet" };
+  const r = await sendPush(env, pushText(plan), "Today");
+  if (!r.ok) return { error: r.reason || r.status };
   const dow = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(when);
-  if (dow === "Sun") await notify(env, "Weekly review is ready. Ask Claude for your Sunday review or open the Week tab.", "Sunday review");
+  if (dow === "Sun") await sendPush(env, "Weekly review is ready. Ask Claude for your Sunday review or open the Week tab.", "Sunday review");
   await env.DB.prepare("UPDATE plans SET pushed_at=datetime('now') WHERE date=?").bind(date).run();
+  return { pushed: true, sleep_ready: plan.sleep_ready };
 }
