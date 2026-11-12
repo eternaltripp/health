@@ -80,6 +80,10 @@
 - 6:00 job applied rule 1 once (-150), second run left it alone; rules_log stayed at 9 rows; 6:30 push stored pushed_at.
 - Withings mapping checked against the doc's encoding (value x 10^unit), keeps the first weigh-in of the day.
 
+### Live check (11/11, 23:10)
+- Deploy phase4 live; migration 0002 applied. /api/plan, /api/review, /api/body, /api/visit all 200 on real data. Real data: rules report no_data/ok; CPAP 30-day compliance 100%; HRV in band; calorie target 1,900.
+- Push: ntfy.sh answered 429 "daily message quota reached". Anonymous ntfy quota is per IP and Workers share egress IPs. Fix: optional NTFY_TOKEN secret (ntfy account access token) sent as Bearer so the quota is the account's. Needs Michael to create the ntfy account/token.
+
 ### Next
 - Retire little-queen-2e28 so the two workers don't both refresh Oura tokens (Oura rotates refresh tokens; whichever refreshes second can break). Rotate old APP_TOKEN.
 - Phase 2: researched rules, morning push, Sunday review.

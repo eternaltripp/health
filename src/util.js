@@ -66,8 +66,12 @@ export async function notifyDetail(env, msg, title = "Health") {
   const u = ntfyUrl(env);
   if (!u) return { ok: false, reason: "NTFY_TOPIC missing" };
   try {
-    const r = await fetch(u, { method: "POST", body: msg, headers: { Title: title } });
-    return { ok: r.ok, status: r.status, reason: r.ok ? null : (await r.text()).slice(0, 200), url_form: /^https?:/i.test(String(env.NTFY_TOPIC).trim()) ? "full url" : "topic name" };
+    const headers = { Title: title };
+    // With an access token ntfy counts the quota against the account, not the
+    // shared Cloudflare egress IP (which hits the anonymous daily limit).
+    if (env.NTFY_TOKEN) headers.Authorization = "Bearer " + env.NTFY_TOKEN;
+    const r = await fetch(u, { method: "POST", body: msg, headers });
+    return { ok: r.ok, status: r.status, reason: r.ok ? null : (await r.text()).slice(0, 200), url_form: /^https?:/i.test(String(env.NTFY_TOPIC).trim()) ? "full url" : "topic name", token: !!env.NTFY_TOKEN };
   } catch (e) { return { ok: false, reason: String(e.message || e) }; }
 }
 export async function notify(env, msg, title = "Health") {
