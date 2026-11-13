@@ -65,14 +65,20 @@ export default {
       if (path === "/auth" || path === "/callback") {
         if (env.OURA_AUTH_ENABLED !== "1") return new Response("Not found", { status: 404 });
         const redirectUri = url.origin + "/callback";
+        // CSRF: a one-time nonce in an HttpOnly cookie, also stored in KV for 10 minutes.
+        // The callback only proceeds in the browser that started /auth.
         if (path === "/auth") {
-          const state = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join(""); // 32 hex chars, no dashes
-          await env.OURA_KV.put("oauth_state:" + state, "1", { expirationTtl: 600 });
-          return Response.redirect(authUrl(env, redirectUri, state), 302);
+          const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+          await env.OURA_KV.put("oauth_state:" + nonce, "1", { expirationTtl: 600 });
+          return new Response(null, { status: 302, headers: {
+            Location: authUrl(env, redirectUri),
+            "Set-Cookie": `oura_auth=${nonce}; Path=/callback; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+          } });
         }
-        const state = url.searchParams.get("state") || "";
-        if (!(await env.OURA_KV.get("oauth_state:" + state))) return html("<h2>Bad or expired state. Start again at /auth.</h2>", 400);
-        await env.OURA_KV.delete("oauth_state:" + state);
+        const cookie = (request.headers.get("Cookie") || "").match(/(?:^|;\s*)oura_auth=([0-9a-f]{32})/);
+        const nonce = cookie ? cookie[1] : "";
+        if (!nonce || !(await env.OURA_KV.get("oauth_state:" + nonce))) return html("<h2>Sign-in expired or started in another browser. Start again at /auth in this browser.</h2>", 400);
+        await env.OURA_KV.delete("oauth_state:" + nonce);
         const code = url.searchParams.get("code");
         if (!code && !url.searchParams.get("error")) return html("<h2>No code returned.</h2>", 400);
         if (url.searchParams.get("error")) return html("<h2>Oura said: " + url.searchParams.get("error").replace(/[<>&]/g, "") + "</h2><p>" + (url.searchParams.get("error_description") || "").replace(/[<>&]/g, "") + "</p>", 400);

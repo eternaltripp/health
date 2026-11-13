@@ -10,9 +10,12 @@ const OURA_API = "https://api.ouraring.com/v2/usercollection";
 // Same list as the app's Example Authorization Url, which Oura accepts.
 const SCOPES = "email personal daily heartrate tag workout session spo2 ring_configuration stress heart_health";
 
-export function authUrl(env, redirectUri, state) {
+// Same parameters, in the same order, as the app's Example Authorization Url. Oura's newer
+// portal rejects a `state` parameter (400 invalid token, 2026-11-13), so the CSRF check uses
+// a one-time cookie instead (see index.js /auth and /callback).
+export function authUrl(env, redirectUri) {
   const p = new URLSearchParams({
-    response_type: "code", client_id: env.CLIENT_ID, redirect_uri: redirectUri, scope: SCOPES, state,
+    client_id: env.CLIENT_ID, redirect_uri: redirectUri, response_type: "code", scope: SCOPES,
   });
   return OURA_AUTH + "?" + p.toString();
 }
