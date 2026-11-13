@@ -7,7 +7,8 @@ const OURA_AUTH = "https://developer.ouraring.com/authorize";
 const OURA_TOKEN = "https://api.ouraring.com/oauth/token";
 const OURA_API = "https://api.ouraring.com/v2/usercollection";
 // heart_health = VO2 max + cardiovascular age (RESEARCHED: openwearables.io Oura guide, Home Assistant forum). Must be ticked on the Oura app, and the app's redirect URI must include https://health.m2thompson.workers.dev/callback.
-const SCOPES = "personal daily heartrate heart_health";
+// Same list as the app's Example Authorization Url, which Oura accepts.
+const SCOPES = "email personal daily heartrate tag workout session spo2 ring_configuration stress heart_health";
 
 export function authUrl(env, redirectUri, state) {
   const p = new URLSearchParams({
