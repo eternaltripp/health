@@ -34,7 +34,7 @@
   "vars": {
     // "1" re-enables the /auth Oura login route. Off by default so nobody can
     // link a different Oura account over the saved tokens.
-    "OURA_AUTH_ENABLED": "1"
+    "OURA_AUTH_ENABLED": "0"
   }
   // Secrets (set in the Cloudflare dashboard, never in this file):
   // CLIENT_ID, CLIENT_SECRET, MYAIR_EMAIL, MYAIR_PASSWORD, MCP_TOKEN, NTFY_TOPIC
