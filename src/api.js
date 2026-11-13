@@ -34,6 +34,15 @@ export async function handleApi(request, env, path) {
       const days = num(q("days") || 28, 2, 365) || 28;
       return json(await getTrends(db, q("metric") || "weight", days));
     }
+    // Shape of the Oura client ID secret, without the full value (Access-protected).
+    if (path === "/api/oura_check") {
+      const id = env.CLIENT_ID || "", sec = env.CLIENT_SECRET || "";
+      return json({
+        client_id_first8: id.trim().slice(0, 8), client_id_length: id.length, client_id_trimmed_length: id.trim().length,
+        client_id_looks_like_uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim()),
+        client_secret_length: sec.length, client_secret_trimmed_length: sec.trim().length,
+      });
+    }
     if (path === "/api/saved_meals") return json({ saved_meals: await listSavedMeals(db) });
     if (path === "/api/scorecard") return json(await getScorecard(db, date(q("date"))));
     if (path === "/api/exercises") return json({ exercises: await exerciseHistory(db) });

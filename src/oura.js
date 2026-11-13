@@ -15,7 +15,7 @@ const SCOPES = "email personal daily heartrate tag workout session spo2 ring_con
 // a one-time cookie instead (see index.js /auth and /callback).
 export function authUrl(env, redirectUri) {
   const p = new URLSearchParams({
-    client_id: env.CLIENT_ID, redirect_uri: redirectUri, response_type: "code", scope: SCOPES,
+    client_id: (env.CLIENT_ID || "").trim(), redirect_uri: redirectUri, response_type: "code", scope: SCOPES,
   });
   return OURA_AUTH + "?" + p.toString();
 }
@@ -26,7 +26,7 @@ export async function exchangeCode(env, code, redirectUri) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "authorization_code", code, redirect_uri: redirectUri,
-      client_id: env.CLIENT_ID, client_secret: env.CLIENT_SECRET,
+      client_id: (env.CLIENT_ID || "").trim(), client_secret: (env.CLIENT_SECRET || "").trim(),
     }),
   });
   if (!r.ok) {
@@ -54,7 +54,7 @@ async function getAccessToken(env) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token", refresh_token: t.refresh_token,
-      client_id: env.CLIENT_ID, client_secret: env.CLIENT_SECRET,
+      client_id: (env.CLIENT_ID || "").trim(), client_secret: (env.CLIENT_SECRET || "").trim(),
     }),
   });
   if (!r.ok) throw new Error("oura_refresh_failed " + r.status);
