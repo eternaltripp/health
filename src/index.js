@@ -66,7 +66,7 @@ export default {
         if (env.OURA_AUTH_ENABLED !== "1") return new Response("Not found", { status: 404 });
         const redirectUri = url.origin + "/callback";
         if (path === "/auth") {
-          const state = crypto.randomUUID();
+          const state = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join(""); // 32 hex chars, no dashes
           await env.OURA_KV.put("oauth_state:" + state, "1", { expirationTtl: 600 });
           return Response.redirect(authUrl(env, redirectUri, state), 302);
         }
