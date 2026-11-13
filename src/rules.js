@@ -163,7 +163,7 @@ async function rule6(db, date) {
 async function rule7(db, date) {
   const base = { id: 7, name: "Glucose (CGM)" };
   const day = addDays(date, -1);
-  const rows = await all(db, "SELECT ts, mg_dl FROM glucose WHERE date=? ORDER BY ts", day);
+  const rows = await all(db, "SELECT ts, mg_dl FROM glucose WHERE date=? AND COALESCE(source,'')<>'test' ORDER BY ts", day);
   if (!rows.length) return { ...base, status: "no_data", message: "No glucose readings yesterday.", input: null };
   const highs = rows.filter((r) => r.mg_dl > T.glucoseHigh);
   const tar = Math.round((highs.length / rows.length) * 100);

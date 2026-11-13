@@ -10,6 +10,7 @@ import APP_HTML from "./app.html";
 import { runModels } from "./models.js";
 import { weekendPush, dinnerPush } from "./pushes.js";
 import { capacityStatus } from "./data.js";
+import { handleHaeIngest } from "./glucose.js";
 
 const VERSION = "brief-2026-11-12";
 
@@ -22,6 +23,12 @@ export default {
       if (path === "/") {
         await ensureSchema(env.DB);
         return json({ app: "health", version: VERSION, ok: true, today_chicago: chicagoDate() });
+      }
+
+      // Health Auto Export -> glucose. Own bearer token (GLUCOSE_INGEST_TOKEN), separate from MCP_TOKEN.
+      if (path === "/ingest/hae") {
+        await ensureSchema(env.DB);
+        return handleHaeIngest(request, env);
       }
 
       if (path === "/mcp") {

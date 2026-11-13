@@ -9,6 +9,7 @@ import { getReview, visitPacket } from "./review.js";
 import { logScan, logEye, logGlucose, getGlucose, setSetting, listSettings, setLiftTarget, listLiftTargets, SETTING_KEYS } from "./data.js";
 import { updateEntry, UPDATABLE, exportData, saveMeal, listSavedMeals, logSavedMeal, logCapacity, capacityStatus, CAPACITY_TESTS } from "./data.js";
 import { getScorecard } from "./scorecard.js";
+import { getIngestLog } from "./glucose.js";
 import { runModels, modelSummary } from "./models.js";
 import { weekendPush, dinnerPush, weekendPlanText } from "./pushes.js";
 
@@ -183,10 +184,16 @@ function buildServer(env) {
 
   server.registerTool("delete_entry", {
     title: "Delete a logged entry",
-    description: "Delete one mistaken food, lift, BP or capacity entry by id (ids come from get_day / get_lifts / get_scorecard), an eye visit by date (id = YYYY-MM-DD), or a saved meal by name (id = the name). Only use when he asks to remove an entry.",
-    inputSchema: { kind: z.enum(["food", "lift", "bp", "eye", "capacity", "saved_meal"]), id: z.union([z.number().int(), z.string()]) },
-  }, async ({ kind, id }) => {
-    const row = await deleteEntry(db, kind, id);
+    description: "Delete one mistaken food, lift, BP or capacity entry by id (ids come from get_day / get_lifts / get_scorecard), an eye visit by date (id = YYYY-MM-DD), or a saved meal by name (id = the name). kind glucose with source 'test' wipes every test glucose row in one call (real CGM rows can't be bulk-deleted). Only use when he asks to remove an entry.",
+    inputSchema: {
+      kind: z.enum(["food", "lift", "bp", "eye", "capacity", "saved_meal", "glucose"]),
+      id: z.union([z.number().int(), z.string()]).optional(),
+      source: z.literal("test").optional().describe("kind glucose only: must be 'test'"),
+    },
+  }, async ({ kind, id, source }) => {
+    if (kind === "glucose" && source !== "test" && id !== "test") return fail("glucose: pass source='test' (only test rows can be bulk-deleted)");
+    if (kind !== "glucose" && id == null) return fail("id is required");
+    const row = await deleteEntry(db, kind, kind === "glucose" ? "test" : id);
     return row ? ok({ deleted: row }) : fail(`no ${kind} with id ${id}`);
   });
 
@@ -350,9 +357,15 @@ function buildServer(env) {
 
   server.registerTool("get_glucose", {
     title: "Get glucose for a day",
-    description: "Glucose readings for one day with mean, peak, and count over 140 mg/dL.",
-    inputSchema: { date: DateArg },
-  }, async ({ date }) => ok(await getGlucose(db, day(date))));
+    description: "Glucose readings for one day with mean, peak, and count over 140 mg/dL. Each reading shows source ('test' = manual Apple Health entries, 'stelo_ah' = Stelo via Apple Health, 'manual', etc.) and source_app. Filter with source.",
+    inputSchema: { date: DateArg, source: z.string().optional().describe("e.g. 'test', 'stelo_ah'") },
+  }, async ({ date, source }) => ok(await getGlucose(db, day(date), source)));
+
+  server.registerTool("get_ingest_log", {
+    title: "Glucose ingest log",
+    description: "Recent Health Auto Export deliveries to /ingest/hae: when each arrived, rows in/new/duplicate, first and last reading time, and any rejection reason. Use to check the iPhone pipe is running.",
+    inputSchema: { limit: z.number().int().min(1).max(200).default(20) },
+  }, async ({ limit }) => ok({ log: await getIngestLog(db, limit) }));
 
   // ---------------- settings ----------------
   server.registerTool("get_settings", {

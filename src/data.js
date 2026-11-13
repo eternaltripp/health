@@ -208,6 +208,12 @@ export async function logBp(db, when, date, sys, dia, pulse, note, source = "mcp
 
 export async function deleteEntry(db, kind, id) {
   if (kind === "eye") return db.prepare("DELETE FROM eye WHERE date=? RETURNING *").bind(String(id)).first();
+  // Glucose: only the test rows can be wiped in bulk (id = the source, must be "test").
+  if (kind === "glucose") {
+    if (String(id) !== "test") return null;
+    const r = await db.prepare("DELETE FROM glucose WHERE source='test' RETURNING ts").all();
+    return { deleted_test_rows: (r.results || []).length };
+  }
   if (kind === "saved_meal") return db.prepare("DELETE FROM saved_meals WHERE name=? RETURNING *").bind(String(id)).first();
   const table = { food: "food", lift: "lifts", bp: "bp", capacity: "capacity" }[kind];
   if (!table) return null;
@@ -354,8 +360,10 @@ export async function logGlucose(db, readings, source, toDate) {
   return readings.length;
 }
 
-export async function getGlucose(db, date) {
-  const rows = await all(db, "SELECT ts, mg_dl FROM glucose WHERE date=? ORDER BY ts", date);
+export async function getGlucose(db, date, source) {
+  const rows = source
+    ? await all(db, "SELECT ts, mg_dl, source, source_app FROM glucose WHERE date=? AND source=? ORDER BY ts", date, source)
+    : await all(db, "SELECT ts, mg_dl, source, source_app FROM glucose WHERE date=? ORDER BY ts", date);
   const v = rows.map((r) => r.mg_dl);
   return { date, readings: rows.length, mean: v.length ? r1(v.reduce((a, b) => a + b, 0) / v.length) : null, peak: v.length ? Math.max(...v) : null, over_140: v.filter((x) => x > 140).length, series: rows };
 }

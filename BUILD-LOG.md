@@ -108,3 +108,9 @@
 - Rule 1 is report-only; calorie target comes from the weekly model (Sunday). Seed 1,900 until the first Sunday.
 - Oura VO2 max / cardio age: 401 with current token. Scopes widened; needs a re-auth.
 - Michael's calls (11-12 3:47 pm): burn window skips the first 7 days of weigh-ins; weekly target never rises while above goal_weight (new setting, blank = never); weekend-plan days capped at the daily target. Tested locally: burn 4,509 → target held at 1,900; weekend days 1,750 = target.
+
+## 2026-11-13 — glucose pipe test (Health Auto Export -> /ingest/hae)
+- Migration 0011_glucose_ingest: extends glucose (adds source_app, unique (ts, source)), adds glucose_ingest_log. Nothing dropped.
+- POST /ingest/hae (bearer GLUCOSE_INGEST_TOKEN): HAE JSON v2, blood_glucose only, upsert no-op on resend, aggregated payloads rejected (422) and logged.
+- MCP: get_glucose (source filter, source/source_app), get_ingest_log, delete_entry kind=glucose source=test. Rule 7 ignores test rows.
+- Local: no token 401, 3 new then 0 new/3 dup, aggregated rejected, mmol converted, bad JSON 400, wrong envelope 400, >5 MB 413.
