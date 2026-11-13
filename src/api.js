@@ -41,6 +41,8 @@ export async function handleApi(request, env, path) {
         client_id_first8: id.trim().slice(0, 8), client_id_length: id.length, client_id_trimmed_length: id.trim().length,
         client_id_looks_like_uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim()),
         client_secret_length: sec.length, client_secret_trimmed_length: sec.trim().length,
+        glucose_token_set: !!(env.GLUCOSE_INGEST_TOKEN || "").trim(), glucose_token_length: (env.GLUCOSE_INGEST_TOKEN || "").length,
+        glucose_token_trimmed_length: (env.GLUCOSE_INGEST_TOKEN || "").trim().length,
       });
     }
     if (path === "/api/saved_meals") return json({ saved_meals: await listSavedMeals(db) });
