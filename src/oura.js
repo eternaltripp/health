@@ -2,7 +2,8 @@
 // (little-queen-2e28) so the tokens already in OURA_KV keep working.
 import { addDays, round1 } from "./util.js";
 
-const OURA_AUTH = "https://cloud.ouraring.com/oauth/authorize";
+// Apps made in Oura's newer developer portal use this authorize page (from the app's Example Authorization Url, 2026-11-12).
+const OURA_AUTH = "https://developer.ouraring.com/authorize";
 const OURA_TOKEN = "https://api.ouraring.com/oauth/token";
 const OURA_API = "https://api.ouraring.com/v2/usercollection";
 // heart_health = VO2 max + cardiovascular age (RESEARCHED: openwearables.io Oura guide, Home Assistant forum). Must be ticked on the Oura app, and the app's redirect URI must include https://health.m2thompson.workers.dev/callback.
@@ -24,7 +25,10 @@ export async function exchangeCode(env, code, redirectUri) {
       client_id: env.CLIENT_ID, client_secret: env.CLIENT_SECRET,
     }),
   });
-  if (!r.ok) throw new Error("oura_token_exchange_failed " + r.status);
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 300);
+    throw new Error("oura_token_exchange_failed " + r.status + " " + body);
+  }
   await saveTokens(env, await r.json());
 }
 

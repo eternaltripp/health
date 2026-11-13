@@ -74,8 +74,10 @@ export default {
         if (!(await env.OURA_KV.get("oauth_state:" + state))) return html("<h2>Bad or expired state. Start again at /auth.</h2>", 400);
         await env.OURA_KV.delete("oauth_state:" + state);
         const code = url.searchParams.get("code");
-        if (!code) return html("<h2>No code returned.</h2>", 400);
-        await exchangeCode(env, code, redirectUri);
+        if (!code && !url.searchParams.get("error")) return html("<h2>No code returned.</h2>", 400);
+        if (url.searchParams.get("error")) return html("<h2>Oura said: " + url.searchParams.get("error").replace(/[<>&]/g, "") + "</h2><p>" + (url.searchParams.get("error_description") || "").replace(/[<>&]/g, "") + "</p>", 400);
+        try { await exchangeCode(env, code, redirectUri); }
+        catch (e) { return html("<h2>Token exchange failed</h2><p>" + String(e.message || e).replace(/[<>&]/g, "") + "</p>", 502); }
         return html("<h2>Oura connected.</h2><p>Set OURA_AUTH_ENABLED back to 0.</p>");
       }
 
