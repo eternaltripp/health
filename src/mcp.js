@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { chicagoDate, addDays, isYmd } from "./util.js";
+import { chicagoDate, addDays, isYmd, parseEatenAt } from "./util.js";
 import { upsertDay, appendNote, foodTotals, getDay, getWeek, getTrends, getLabs, getMeds, getLifts, TREND_METRICS, logFood, logLift, logBp, deleteEntry } from "./data.js";
 import { syncAll } from "./sync.js";
 import { evaluate, runRules } from "./rules.js";
@@ -10,6 +10,7 @@ import { logScan, logEye, logGlucose, getGlucose, setSetting, listSettings, setL
 import { updateEntry, UPDATABLE, exportData, saveMeal, listSavedMeals, logSavedMeal, logCapacity, capacityStatus, CAPACITY_TESTS } from "./data.js";
 import { getScorecard } from "./scorecard.js";
 import { getIngestLog } from "./glucose.js";
+import { mealGlucose } from "./data.js";
 import { runModels, modelSummary } from "./models.js";
 import { weekendPush, dinnerPush, weekendPlanText } from "./pushes.js";
 
@@ -35,9 +36,11 @@ function buildServer(env) {
     title: "Log food",
     description:
       "Record food or drink Michael ate. Call this every time he reports eating or drinking something with calories (meals, snacks, shakes, alcohol). " +
-      "One call can hold several items. Estimate calories, protein and sodium if he doesn't give them, and mark est=true. Returns the day's running totals.",
+      "One call can hold several items. Estimate calories, protein and sodium if he doesn't give them, and mark est=true. Returns the day's running totals. " +
+      "Meal time: when he tells you or sends a photo, that's when he ate, so leave eaten_at out and it's stamped now. Set eaten_at only when he says he ate earlier (e.g. '12:30'). Never put the time in the item name.",
     inputSchema: {
       date: DateArg,
+      eaten_at: z.string().optional().describe("When he ate, if not right now: 'HH:MM' 24-hour Chicago time on that date, or an ISO timestamp. Omit = now."),
       meal: z.enum(MEALS).describe("Which meal these items belong to."),
       items: z.array(z.object({
         name: z.string().min(1).describe("What it was, with portion, e.g. '8 oz grilled chicken breast'."),
@@ -48,9 +51,10 @@ function buildServer(env) {
         restaurant: z.boolean().default(false).describe("true if it came from a restaurant, takeout or catered event"),
       })).min(1),
     },
-  }, async ({ date, meal, items }) => {
+  }, async ({ date, meal, items, eaten_at }) => {
     const d = day(date);
-    const logged = await logFood(db, d, meal, items);
+    if (eaten_at && !parseEatenAt(eaten_at, d)) return fail("eaten_at must be HH:MM (24-hour, Chicago) or an ISO timestamp");
+    const logged = await logFood(db, d, meal, items, eaten_at);
     return ok({ logged, date: d, day_totals: await foodTotals(db, d) });
   });
 
@@ -242,10 +246,10 @@ function buildServer(env) {
   server.registerTool("log_saved_meal", {
     title: "Log a saved meal",
     description: "Log a saved meal by name (case-insensitive). servings scales every item. Returns the day's totals.",
-    inputSchema: { name: z.string().min(1), date: DateArg, meal: z.enum(MEALS).optional(), servings: z.number().positive().default(1) },
-  }, async ({ name, date, meal, servings }) => {
+    inputSchema: { name: z.string().min(1), date: DateArg, meal: z.enum(MEALS).optional(), servings: z.number().positive().default(1), eaten_at: z.string().optional().describe("'HH:MM' Chicago or ISO if he ate earlier. Omit = now.") },
+  }, async ({ name, date, meal, servings, eaten_at }) => {
     const d = day(date);
-    const r = await logSavedMeal(db, name, d, meal, servings);
+    const r = await logSavedMeal(db, name, d, meal, servings, eaten_at);
     if (!r) return fail(`no saved meal named "${name}". Saved: ${(await listSavedMeals(db)).map((m) => m.name).join(", ") || "none"}`);
     return ok({ ...r, date: d, day_totals: await foodTotals(db, d) });
   });
@@ -360,6 +364,12 @@ function buildServer(env) {
     description: "Glucose readings for one day with mean, peak, and count over 140 mg/dL. Each reading shows source ('test' = manual Apple Health entries, 'stelo_ah' = Stelo via Apple Health, 'manual', etc.) and source_app. Filter with source.",
     inputSchema: { date: DateArg, source: z.string().optional().describe("e.g. 'test', 'stelo_ah'") },
   }, async ({ date, source }) => ok(await getGlucose(db, day(date), source)));
+
+  server.registerTool("get_meal_glucose", {
+    title: "Meals vs glucose",
+    description: "For one day: each meal (items eaten within 30 min of each other) with the glucose response after it: baseline before eating, peak, rise, minutes to peak, and minutes until back near baseline. Use for 'what did that meal do to my glucose' and to compare meals. Stelo data arrives about 3 hours late, so the latest meal may be incomplete.",
+    inputSchema: { date: DateArg },
+  }, async ({ date }) => ok(await mealGlucose(db, day(date))));
 
   server.registerTool("get_ingest_log", {
     title: "Glucose ingest log",

@@ -114,3 +114,8 @@
 - POST /ingest/hae (bearer GLUCOSE_INGEST_TOKEN): HAE JSON v2, blood_glucose only, upsert no-op on resend, aggregated payloads rejected (422) and logged.
 - MCP: get_glucose (source filter, source/source_app), get_ingest_log, delete_entry kind=glucose source=test. Rule 7 ignores test rows.
 - Local: no token 401, 3 new then 0 new/3 dup, aggregated rejected, mmol converted, bad JSON 400, wrong envelope 400, >5 MB 413.
+
+## 2026-11-14 — meal times for glucose matching
+- Migration 0012_food_eaten_at: food.eaten_at (UTC ISO). Backfilled from logging time for rows logged the day they were eaten; imported history stays NULL.
+- Rule (Michael): telling the coach or sending a photo = eaten now. log_food / log_saved_meal take optional eaten_at ("HH:MM" Chicago or ISO) for "ate earlier". update_entry can fix eaten_at.
+- New tool get_meal_glucose(date): per meal baseline, peak, rise, minutes to peak, minutes back to baseline (SPEC windows, descriptive).

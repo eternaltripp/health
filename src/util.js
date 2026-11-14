@@ -96,3 +96,21 @@ export async function sendPush(env, msg, title = "Health") {
 export async function notify(env, msg, title = "Health") {
   return (await sendPush(env, msg, title)).ok;
 }
+
+/** Chicago wall time (YYYY-MM-DD + HH:MM) -> UTC ISO string. Handles CST/CDT by checking both offsets. */
+export function chicagoToUtc(date, hhmm) {
+  for (const off of ["-06:00", "-05:00"]) {
+    const d = new Date(`${date}T${hhmm}:00${off}`);
+    if (!isNaN(d) && chicagoDate(d) === date && chicagoHour(d) === Number(hhmm.slice(0, 2))) return d.toISOString();
+  }
+  return null;
+}
+/** "HH:MM" (Chicago, on `date`) or an ISO timestamp -> UTC ISO, or null if unparseable. */
+export function parseEatenAt(v, date) {
+  if (v == null || v === "") return null;
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) return chicagoToUtc(date, m[1].padStart(2, "0") + ":" + m[2]);
+  const d = new Date(s);
+  return isNaN(d) ? null : d.toISOString();
+}

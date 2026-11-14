@@ -1,5 +1,5 @@
 // Read/write helpers shared by the MCP tools.
-import { addDays, chicagoDate } from "./util.js";
+import { addDays, chicagoDate, parseEatenAt } from "./util.js";
 import { modelSummary } from "./models.js";
 
 const r1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
@@ -36,7 +36,7 @@ export async function getDay(db, date) {
   const prev = addDays(date, -1);
   const [day, food, lifts, bp, oura, cpapPrev, cpapSame] = await Promise.all([
     first(db, "SELECT date, weight, water_oz, wine_glasses, sauna_min, steps, cans, caffeine_mg, caffeine_last_time, last_meal_time, waist_in, note FROM days WHERE date=?", date),
-    all(db, "SELECT id, meal, name, cal, protein_g, sodium_mg, est, restaurant FROM food WHERE date=? ORDER BY id", date),
+    all(db, "SELECT id, meal, name, cal, protein_g, sodium_mg, est, restaurant, eaten_at FROM food WHERE date=? ORDER BY COALESCE(eaten_at, created_at), id", date),
     all(db, "SELECT id, exercise, set_no, weight_lb, reps, rpe, note FROM lifts WHERE date=? ORDER BY exercise, set_no", date),
     all(db, "SELECT id, ts, sys, dia, pulse, note FROM bp WHERE date=? ORDER BY ts", date),
     first(db, "SELECT * FROM oura WHERE date=?", date),
@@ -46,7 +46,7 @@ export async function getDay(db, date) {
   return {
     date,
     day: day || null,
-    food: { totals: await foodTotals(db, date), items: food.map((f) => ({ ...f, est: !!f.est, restaurant: !!f.restaurant })) },
+    food: { totals: await foodTotals(db, date), items: food.map((f) => ({ ...f, est: !!f.est, restaurant: !!f.restaurant, eaten_local: f.eaten_at ? new Date(f.eaten_at).toLocaleTimeString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" }) : null })) },
     lifts,
     bp,
     oura: oura || null,
@@ -185,11 +185,16 @@ export async function getLifts(db, { exercise, days = 90 } = {}) {
 
 // ---------- shared inserts (MCP tools and the web page both use these) ----------
 
-export async function logFood(db, date, meal, items) {
-  const res = await db.batch(items.map((i) => db.prepare(
-    "INSERT INTO food (date, meal, name, cal, protein_g, sodium_mg, est, restaurant, source) VALUES (?,?,?,?,?,?,?,?,?) RETURNING id"
-  ).bind(date, meal, i.name, i.cal, i.protein_g, i.sodium_mg ?? null, i.est === false ? 0 : 1, i.restaurant ? 1 : 0, i.source || "mcp")));
-  return res.map((r, k) => ({ id: r.results[0].id, name: items[k].name }));
+// eatenAt: "HH:MM" (Chicago) or ISO. Rule (Michael 2026-11-14): no time given = eaten now,
+// when logging for today. Backdated logs with no time stay NULL (unknown).
+export async function logFood(db, date, meal, items, eatenAt) {
+  const now = new Date();
+  const dflt = eatenAt ? parseEatenAt(eatenAt, date) : date === chicagoDate(now) ? now.toISOString() : null;
+  const times = items.map((i) => (i.eaten_at ? parseEatenAt(i.eaten_at, date) : dflt));
+  const res = await db.batch(items.map((i, k) => db.prepare(
+    "INSERT INTO food (date, meal, name, cal, protein_g, sodium_mg, est, restaurant, source, eaten_at) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id"
+  ).bind(date, meal, i.name, i.cal, i.protein_g, i.sodium_mg ?? null, i.est === false ? 0 : 1, i.restaurant ? 1 : 0, i.source || "mcp", times[k])));
+  return res.map((r, k) => ({ id: r.results[0].id, name: items[k].name, eaten_at: times[k] }));
 }
 
 export async function logLift(db, date, exercise, sets, source = "mcp") {
@@ -222,7 +227,7 @@ export async function deleteEntry(db, kind, id) {
 
 // Columns update_entry may change, per kind. Keys (id/date) are never editable.
 export const UPDATABLE = {
-  food: { table: "food", key: "id", cols: { date: "t", meal: "t", name: "t", cal: "n", protein_g: "n", sodium_mg: "n", est: "b", restaurant: "b" } },
+  food: { table: "food", key: "id", cols: { date: "t", meal: "t", name: "t", cal: "n", protein_g: "n", sodium_mg: "n", est: "b", restaurant: "b", eaten_at: "t" } },
   lift: { table: "lifts", key: "id", cols: { date: "t", exercise: "t", set_no: "n", weight_lb: "n", reps: "n", rpe: "n", note: "t" } },
   bp: { table: "bp", key: "id", cols: { ts: "t", date: "t", sys: "n", dia: "n", pulse: "n", note: "t" } },
   eye: { table: "eye", key: "date", cols: { injection: "b", drug: "t", interval_weeks: "n", oct_thickness: "n", note: "t" } },
@@ -247,6 +252,7 @@ export async function updateEntry(db, kind, id, fields, append = false) {
     else {
       if ((k === "caffeine_last_time" || k === "last_meal_time") && !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) throw new Error(`${k} must be HH:MM`);
       if (k === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error("date must be YYYY-MM-DD");
+      if (k === "eaten_at") { const iso = parseEatenAt(v, fields.date || cur.date); if (!iso) throw new Error("eaten_at must be HH:MM (Chicago) or an ISO timestamp"); set[k] = iso; continue; }
       set[k] = append && cur[k] ? cur[k].replace(/\s+$/, "") + (/[.!?]$/.test(cur[k].trim()) ? " " : ". ") + v : String(v);
     }
   }
@@ -292,7 +298,7 @@ export async function listSavedMeals(db) {
     return { name: r.name, meal: r.meal, items, totals: { cal: t("cal"), protein_g: t("protein_g"), sodium_mg: t("sodium_mg") } };
   });
 }
-export async function logSavedMeal(db, name, date, meal, servings = 1) {
+export async function logSavedMeal(db, name, date, meal, servings = 1, eatenAt) {
   const row = await first(db, "SELECT * FROM saved_meals WHERE name=? COLLATE NOCASE", name);
   if (!row) return null;
   const items = JSON.parse(row.items).map((i) => ({
@@ -301,7 +307,7 @@ export async function logSavedMeal(db, name, date, meal, servings = 1) {
     sodium_mg: i.sodium_mg != null ? Math.round(i.sodium_mg * servings) : null,
     est: i.est !== false, restaurant: !!i.restaurant, source: "saved:" + row.name,
   }));
-  const logged = await logFood(db, date, meal || row.meal || "other", items);
+  const logged = await logFood(db, date, meal || row.meal || "other", items, eatenAt);
   return { saved_meal: row.name, logged };
 }
 
@@ -384,4 +390,44 @@ export async function setLiftTarget(db, t) {
 }
 export async function listLiftTargets(db) {
   return all(db, "SELECT * FROM lift_targets ORDER BY exercise");
+}
+
+// ---------- meals vs glucose ----------
+// Windows are SPEC (descriptive, not thresholds): items within 30 min = one meal, baseline = mean of the
+// 30 min before eating, response window = 3 h after, "back to baseline" = first reading after the peak
+// within 10 mg/dL of baseline. Test rows are ignored. Stelo reaches Apple Health ~3 h late, so recent meals show partial data.
+export async function mealGlucose(db, date) {
+  const food = await all(db, "SELECT id, meal, name, cal, protein_g, eaten_at FROM food WHERE date=? ORDER BY eaten_at", date);
+  const timed = food.filter((f) => f.eaten_at);
+  const meals = [];
+  for (const f of timed) {
+    const t = Date.parse(f.eaten_at), last = meals[meals.length - 1];
+    if (last && t - last.end <= 30 * 60000) { last.items.push(f); last.end = t; } else meals.push({ start: t, end: t, items: [f] });
+  }
+  const out = [];
+  for (const m of meals) {
+    const from = new Date(m.start - 30 * 60000).toISOString(), to = new Date(m.start + 180 * 60000).toISOString();
+    const g = await all(db, "SELECT ts, mg_dl FROM glucose WHERE ts BETWEEN ? AND ? AND COALESCE(source,'')<>'test' ORDER BY ts", from, to);
+    const pre = g.filter((r) => Date.parse(r.ts) <= m.start), post = g.filter((r) => Date.parse(r.ts) > m.start);
+    const loc = (ms) => new Date(ms).toLocaleTimeString("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" });
+    const base = pre.length ? pre.reduce((a, r) => a + r.mg_dl, 0) / pre.length : null;
+    const row = {
+      eaten_local: loc(m.start), eaten_at: new Date(m.start).toISOString(),
+      items: m.items.map((i) => i.name), cal: Math.round(m.items.reduce((a, i) => a + (i.cal || 0), 0)), protein_g: Math.round(m.items.reduce((a, i) => a + (i.protein_g || 0), 0)),
+      readings_before: pre.length, readings_after: post.length, baseline: r1(base),
+    };
+    if (post.length) {
+      const peak = post.reduce((a, r) => (r.mg_dl > a.mg_dl ? r : a));
+      const back = base == null ? null : post.find((r) => r.ts > peak.ts && r.mg_dl <= base + 10);
+      Object.assign(row, {
+        peak: peak.mg_dl, peak_local: loc(Date.parse(peak.ts)), minutes_to_peak: Math.round((Date.parse(peak.ts) - m.start) / 60000),
+        rise: base == null ? null : r1(peak.mg_dl - base),
+        minutes_back_to_baseline: back ? Math.round((Date.parse(back.ts) - m.start) / 60000) : null,
+        window_complete: Date.parse(post[post.length - 1].ts) >= m.start + 170 * 60000,
+      });
+    } else row.note = "No glucose readings after this meal yet (Stelo reaches Apple Health about 3 h late).";
+    out.push(row);
+  }
+  return { date, meals: out, untimed_items: food.filter((f) => !f.eaten_at).map((f) => f.name),
+    method: "Items within 30 min = one meal. Baseline = mean of the 30 min before. Peak within 3 h after. Back to baseline = within 10 mg/dL (SPEC windows, descriptive only)." };
 }
